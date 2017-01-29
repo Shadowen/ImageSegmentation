@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
+from supervised_vertices import generate
 
 
 def make_variables(shape):
@@ -20,73 +21,86 @@ def max_pool_2x2(x):
     return tf.nn.max_pool(x, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
 
 
-def create_cnn():
-    image = tf.placeholder(tf.float32, shape=[None, 32, 32, 3])
-    previous_mask = tf.placeholder(tf.float32, shape=[None, 32, 32])
-    ground_truth_mask = tf.placeholder(tf.float32, shape=[None, 32, 32])
-    actions = tf.placeholder(tf.int32, shape=[None, 1024])
-    targets = tf.placeholder(tf.float32, shape=[None])
+class Estimator():
+    def __init__(self):
+        self.x = tf.placeholder(tf.float32, shape=[None, 32, 32, 3])
+        self.keep_prob = tf.placeholder_with_default(1.0, [])
+        self.targets = tf.placeholder(tf.int32, shape=[None])
+        self.targets_onehot = tf.one_hot(self.targets, 32 * 32)
 
-    input_tensor = tf.stack(tf.unstack(image, axis=3) + [previous_mask], axis=3)
-    batch_size = tf.shape(input_tensor)[0]
+        with tf.variable_scope('conv1'):
+            self.W_conv1, self.b_conv1 = make_variables([5, 5, 3, 32])
+            self.h_conv1 = tf.nn.relu(conv2d(self.x, self.W_conv1) + self.b_conv1)
+            self.h_pool1 = max_pool_2x2(self.h_conv1)
 
-    with tf.variable_scope('conv1'):
-        W_conv1, b_conv1 = make_variables([5, 5, 4, 32])
-        h_conv1 = tf.nn.relu(conv2d(input_tensor, W_conv1) + b_conv1)
-        h_pool1 = max_pool_2x2(h_conv1)
+        with tf.variable_scope('conv2'):
+            self.W_conv2, self.b_conv2 = make_variables([5, 5, 32, 64])
+            self.h_conv2 = tf.nn.relu(conv2d(self.h_pool1, self.W_conv2) + self.b_conv2)
+            self.h_pool2 = max_pool_2x2(self.h_conv2)
 
-    with tf.variable_scope('conv2'):
-        W_conv2, b_conv2 = make_variables([5, 5, 32, 64])
-        h_conv2 = tf.nn.relu(conv2d(h_pool1, W_conv2) + b_conv2)
-        h_pool2 = max_pool_2x2(h_conv2)
+        with tf.variable_scope('fc1'):
+            self.W_fc1, self.b_fc1 = make_variables([8 * 8 * 64, 1024])
+            self.h_pool2_flat = tf.reshape(self.h_pool2, [-1, 8 * 8 * 64])
+            self.h_fc1 = tf.nn.relu(tf.matmul(self.h_pool2_flat, self.W_fc1) + self.b_fc1)
+            self.h_fc1_drop = tf.nn.dropout(self.h_fc1, self.keep_prob)
 
-    with tf.variable_scope('fc1'):
-        W_fc1, b_fc1 = make_variables([8 * 8 * 64, 1024])
-        h_pool2_flat = tf.reshape(h_pool2, [-1, 8 * 8 * 64])
-        h_fc1 = tf.nn.relu(tf.matmul(h_pool2_flat, W_fc1) + b_fc1)
+        with tf.variable_scope('fc2'):
+            self.W_fc2, self.b_fc2 = make_variables([1024, 32 * 32])
+            self.y_flat = tf.matmul(self.h_fc1_drop, self.W_fc2) + self.b_fc2
+            self.y = tf.reshape(self.y_flat, shape=[-1, 32, 32])
 
-    with tf.variable_scope('fc2'):
-        W_fc2, b_fc2 = make_variables([1024, 32 * 32])
-        y_flat = tf.matmul(h_fc1, W_fc2) + b_fc2
-        y = tf.reshape(y_flat, shape=[-1, 32, 32])
+            self.prediction = tf.argmax(self.y_flat, dimension=1)
 
-    predicted_idx = tf.argmax(y_flat, dimension=1)
-    predicted_mask = tf.one_hot(predicted_idx, depth=1024)
-    ground_truth_mask_flat = tf.reshape(ground_truth_mask, shape=[-1, 1024])
-    previous_mask_flat = tf.reshape(previous_mask, shape=[-1, 1024])
-    previous_tp_mask_flat = previous_mask_flat * ground_truth_mask_flat
-    tp_mask = ground_truth_mask_flat * predicted_mask
-    fp_mask = (1 - ground_truth_mask_flat) * predicted_mask
-    new_tp_mask = (ground_truth_mask_flat - previous_tp_mask_flat) * predicted_mask
-
-    reward = tf.reduce_sum(new_tp_mask) - tf.reduce_sum(fp_mask)
-
-    gather_indices = tf.range(batch_size) * tf.shape(y_flat)[1] + actions
-    action_predictions = tf.gather(tf.reshape(y_flat, [-1]), gather_indices)
-    # Calculate the loss
-    loss = tf.reduce_mean(tf.squared_difference(targets, action_predictions))
-    train_op = tf.train.RMSPropOptimizer().minimize(loss)
-
-    return image, previous_mask, ground_truth_mask, actions, targets, predicted_mask, tp_mask, fp_mask, new_tp_mask, \
-           reward, loss, train_op
+        # Calculate the loss
+        self.losses = tf.nn.sparse_softmax_cross_entropy_with_logits(self.y_flat, self.targets)
+        self.loss_op = tf.reduce_mean(self.losses)
+        self.train_op = tf.train.RMSPropOptimizer(0.001).minimize(self.loss_op)
 
 
-with np.load('dataset_simple.npz') as data:
-    input_images, ground_truth_verts, ground_truth_masks = data['arr_0']
-    input_images = np.repeat(np.expand_dims(input_images, axis=3), 3, axis=3)
+def display_samples(x, truth, prediction):
+    print("showing")
+    fig, ax = plt.subplots(nrows=len(x), ncols=5)
+    [ax[0][e].set_title(t) for e, t in enumerate(['Image', 'History', 'Cursor', 'Truth', 'Prediction'])]
+    for i in range(len(x)):
+        xi = np.moveaxis(x[i], 2, 0)
+        for e in range(3):
+            ax[i][e].axis('off')
+            ax[i][e].imshow(xi[e], cmap='gray', interpolation='nearest')
+        ax[i][3].axis('off')
+        ax[i][3].imshow(generate.create_point_mask((truth[i] // 32, truth[i] % 32), image_size=32), cmap='gray',
+            interpolation='nearest')
+        ax[i][4].axis('off')
+        ax[i][4].imshow(generate.create_point_mask((prediction[i] // 32, prediction[i] % 32), image_size=32),
+            cmap='gray', interpolation='nearest')
+    plt.show()
 
-image, previous_mask, ground_truth_mask, actions, targets, predicted_mask, tp_mask, fp_mask, new_tp_mask, reward, \
-loss, train_op = create_cnn()
+
+data = np.load('dataset_polygons.npy')
+print('{} polygons loaded.'.format(data.shape[0]))
+valid_size = 50
+training_data = data[valid_size:]
+validation_data = data[:valid_size]
+print('{} for training. {} for validation.'.format(len(training_data), len(validation_data)))
+est = Estimator()
+
 with tf.Session() as sess:
     sess.run(tf.global_variables_initializer())
-    baseline = sess.run(reward, {
-        image:input_images[:1], previous_mask:np.zeros([100, 32, 32])[:1], ground_truth_mask:ground_truth_masks[:1]
-    })
-    print(np.max(baseline))
 
-    predictions = sess.run(predicted_mask, {
-        image:input_images[:1], previous_mask:np.zeros([100, 32, 32])[:1]
-    }).reshape([-1, 32, 32])
-    plt.imshow(input_images[0] * 0.5, interpolation='nearest')
-    plt.imshow(predictions[0], alpha=0.5, cmap='gray', interpolation='nearest')
-    plt.show()
+    batch_size = 50
+    for iteration in range(10001):
+        print('Beginning iteration {}'.format(iteration), end='\t')
+
+        batch_indices = np.random.choice(training_data.shape[0], batch_size, replace=False)
+        batch_x, batch_t = zip(
+            *[generate.create_training_sample(32, vertices, truth) for vertices, truth in training_data[batch_indices]])
+        loss, _ = sess.run([est.loss_op, est.train_op], {est.x:batch_x, est.targets:batch_t, est.keep_prob:0.7})
+        print(loss, end='\t')
+
+        valid_x, valid_t = zip(
+            *[generate.create_training_sample(32, vertices, truth) for vertices, truth in validation_data])
+        valid_predictions, valid_loss = sess.run([est.prediction, est.loss_op], {est.x:valid_x, est.targets:valid_t})
+        print(valid_loss)
+
+        # if iteration == 10000:
+        #     print(valid_predictions == valid_t)
+        #     display_samples(valid_x[:10], valid_t[:10], valid_predictions[:10])

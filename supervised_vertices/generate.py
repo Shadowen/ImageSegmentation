@@ -11,39 +11,6 @@ import matplotlib.pyplot as plt
 from matplotlib.path import Path
 
 
-def _step(self, action):
-    done = False
-    reward = 0
-
-    self.cursor = action
-    if self.cursor in self.player_points:
-        player_polygon = np.zeros_like(self.image)
-        rr, cc = skimage.draw.polygon(*zip(*self.player_points))
-        player_polygon[rr, cc] = 1
-        intersection = np.count_nonzero(player_polygon * self.ground_truth)
-        union = np.count_nonzero(player_polygon) + np.count_nonzero(self.ground_truth) - intersection
-        print(np.count_nonzero(player_polygon), np.count_nonzero(self.ground_truth))
-        print(intersection, union)
-        reward = intersection / union
-        done = True
-
-    # Build the player mask
-    self.player_points.append(self.cursor)
-    for i in range(len(self.player_points)):
-        rr, cc = skimage.draw.line(*self.player_points[i - 1], *self.player_points[i])
-        self.player_mask[rr, cc] = 1
-
-    # Build the cursor mask
-    cursor_mask = np.zeros_like(self.ground_truth)
-    cursor_mask[self.cursor] = 1
-
-    state = np.stack([self.image, self.player_mask, cursor_mask])
-    return state, reward, done, {}
-
-
-n = 0
-
-
 def create_polygon(image_size, shape_complexity=3):
     # Create the polygon
     polygon_points = shape_complexity
@@ -69,6 +36,28 @@ def create_valid_polygon(image_size, shape_complexity, min_area):
         if area > min_area:
             break
     return poly_verts, ground_truth
+
+
+def create_training_sample(image_size, poly_verts, ground_truth):
+    # Create training examples out of it
+    image = ground_truth
+
+    total_num_verts = len(poly_verts)
+    start_idx = np.random.randint(total_num_verts)
+    poly_verts = poly_verts[start_idx:] + poly_verts[
+                                          :start_idx]  # Probably should optimize this with a numpy array and clever
+    # math    # Use np.roll
+
+    num_points = np.random.randint(1, total_num_verts)
+
+    player_mask = create_player_mask(poly_verts, num_points, image_size)
+    cursor_mask = create_point_mask(poly_verts[num_points - 1], image_size)
+    state = np.stack([image, player_mask, cursor_mask], axis=2)
+
+    next_point = poly_verts[num_points % total_num_verts]
+    # next_point_mask = create_point_mask(next_point, image_size)
+
+    return state, next_point[0] * image_size + next_point[1]
 
 
 def create_shape_mask(vertices, image_size):
@@ -133,18 +122,21 @@ def create_sample(image_size, shape_complexity=5, allow_inverted=False):
 
 
 if __name__ == '__main__':
-    samples = [np.concatenate([x[0], x[1][np.newaxis]]) for x in create_sample(image_size=32, shape_complexity=3)]
-    fig, ax = plt.subplots(nrows=len(samples), ncols=samples[0].shape[0])
-    [ax[0][e].set_title(['Image', 'History', 'Cursor', 'Next'][e]) for e in range(samples[0].shape[0])]
-    for i in range(len(samples)):
-        for e in range(samples[i].shape[0]):
-            ax[i][e].axis('off')
-            ax[i][e].imshow(samples[i][e], cmap='gray', interpolation='nearest')
+    # samples = [np.concatenate([x[0], x[1][np.newaxis]]) for x in create_sample(image_size=32, shape_complexity=3)]
+    # fig, ax = plt.subplots(nrows=len(samples), ncols=samples[0].shape[0])
+    # [ax[0][e].set_title(['Image', 'History', 'Cursor', 'Next'][e]) for e in range(samples[0].shape[0])]
+    # for i in range(len(samples)):
+    #     for e in range(samples[i].shape[0]):
+    #         ax[i][e].axis('off')
+    #         ax[i][e].imshow(samples[i][e], cmap='gray', interpolation='nearest')
     # plt.show()
-    print(samples[1][0].nbytes)
-    # plt.savefig('sample_single')
+    # print(samples[1][0].nbytes)
+    # # plt.savefig('sample_single')
 
     # many_samples = list(itertools.chain.from_iterable(
     #     create_sample(image_size=32, shape_complexity=5) for _ in range(1000)))  # Out of disk space?
-    # print(sum(x[0].nbytes + x[1].nbytes for x in many_samples))
+    # # print(sum(x[0].nbytes + x[1].nbytes for x in many_samples))
     # np.save('dataset_large', many_samples)
+
+    many_samples = [create_valid_polygon(image_size=32, shape_complexity=5, min_area=86) for _ in range(1000)]
+    np.save('dataset_polygons', many_samples)
