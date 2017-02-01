@@ -56,6 +56,15 @@ class Estimator():
         self.loss_op = tf.reduce_mean(self.losses)
         self.train_op = tf.train.RMSPropOptimizer(0.001).minimize(self.loss_op)
 
+        # Accuracy
+        self.y_coords = [tf.mod(tf.argmax(self.y_flat, dimension=1), 32),
+                         tf.floordiv(tf.argmax(self.y_flat, dimension=1), 32)]
+        self.y_coords = tf.stack(self.y_coords, axis=1)
+        self.target_coords = [tf.to_int64(tf.mod(self.targets, 32)), tf.to_int64(tf.floordiv(self.targets, 32))]
+        self.target_coords = tf.stack(self.target_coords, axis=1)
+        self.individual_accuracy = tf.sqrt(tf.to_float(tf.reduce_sum((self.y_coords - self.target_coords) ** 2, 1)))
+        self.accuracy_op = tf.reduce_mean(self.individual_accuracy)
+
 
 def display_samples(x, truth, prediction):
     print("showing")
@@ -77,9 +86,10 @@ def display_samples(x, truth, prediction):
 
 data = np.load('dataset_polygons.npy')
 print('{} polygons loaded.'.format(data.shape[0]))
-valid_size = 50
+valid_size = data.shape[0] // 10
 training_data = data[valid_size:]
 validation_data = data[:valid_size]
+del data # Make sure we don't contaminate the training set
 print('{} for training. {} for validation.'.format(len(training_data), len(validation_data)))
 est = Estimator()
 
@@ -94,13 +104,16 @@ with tf.Session() as sess:
         batch_x, batch_t = zip(
             *[generate.create_training_sample(32, vertices, truth) for vertices, truth in training_data[batch_indices]])
         loss, _ = sess.run([est.loss_op, est.train_op], {est.x:batch_x, est.targets:batch_t, est.keep_prob:0.7})
-        print(loss, end='\t')
+        print('loss={}'.format(loss), end='\t')
 
         valid_x, valid_t = zip(
             *[generate.create_training_sample(32, vertices, truth) for vertices, truth in validation_data])
-        valid_predictions, valid_loss = sess.run([est.prediction, est.loss_op], {est.x:valid_x, est.targets:valid_t})
-        print(valid_loss)
+        valid_predictions, valid_accuracy, valid_loss = sess.run([est.prediction, est.accuracy_op, est.loss_op],
+            {est.x:valid_x, est.targets:valid_t, est.keep_prob:1.0})
+        print('valid loss={}\tvalid_acc={}'.format(valid_loss, valid_accuracy))
 
-        # if iteration == 10000:
-        #     print(valid_predictions == valid_t)
-        #     display_samples(valid_x[:10], valid_t[:10], valid_predictions[:10])
+        if iteration % 2500 == 0:
+            batch_predictions = sess.run(est.prediction, {est.x:batch_x, est.targets:batch_t, est.keep_prob:1.0})
+            display_samples(batch_x[:10], batch_t[:10], batch_predictions[:10])
+
+            display_samples(valid_x[:10], valid_t[:10], valid_predictions[:10])

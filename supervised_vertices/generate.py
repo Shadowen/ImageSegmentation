@@ -138,5 +138,5 @@ if __name__ == '__main__':
     # # print(sum(x[0].nbytes + x[1].nbytes for x in many_samples))
     # np.save('dataset_large', many_samples)
 
-    many_samples = [create_valid_polygon(image_size=32, shape_complexity=5, min_area=86) for _ in range(1000)]
+    many_samples = [create_valid_polygon(image_size=32, shape_complexity=5, min_area=86) for _ in range(10000)]
     np.save('dataset_polygons', many_samples)
