@@ -40,7 +40,7 @@ def create_valid_polygon(image_size, shape_complexity, min_area):
 
 def create_training_sample(image_size, poly_verts, ground_truth):
     # Create training examples out of it
-    image = ground_truth
+    image = create_image(ground_truth)
 
     total_num_verts = len(poly_verts)
     start_idx = np.random.randint(total_num_verts)
@@ -81,11 +81,26 @@ def create_point_mask(point, image_size):
     return mask
 
 
+def create_image(ground_truth):
+    """ Apply distortion to the ground truth to generate the image the algorithm will see. """
+    image = np.copy(ground_truth)
+
+    # Salt and pepper noise
+    amount = 0.04
+    num_salt = np.ceil(amount * image.size)
+    coords = [np.random.randint(0, i - 1, int(num_salt)) for i in image.shape]
+    image[coords] = 1
+
+    coords = [np.random.randint(0, i - 1, int(num_salt)) for i in image.shape]
+    image[coords] = 0
+    return image
+
+
 def create_sample(image_size, shape_complexity=5, allow_inverted=False):
     samples = []
     # Generate a valid polygon
     poly_verts, ground_truth = create_valid_polygon(image_size, shape_complexity, min_area=image_size * 3)
-    image = ground_truth
+    image = create_image(ground_truth)
 
     # Create training examples out of it
     total_num_verts = len(poly_verts)
@@ -122,7 +137,7 @@ def create_sample(image_size, shape_complexity=5, allow_inverted=False):
 
 
 if __name__ == '__main__':
-    # samples = [np.concatenate([x[0], x[1][np.newaxis]]) for x in create_sample(image_size=32, shape_complexity=3)]
+    # samples = [np.concatenate([x[0], x[1][np.newaxis]]) for x in create_sample(image_size=128, shape_complexity=3)]
     # fig, ax = plt.subplots(nrows=len(samples), ncols=samples[0].shape[0])
     # [ax[0][e].set_title(['Image', 'History', 'Cursor', 'Next'][e]) for e in range(samples[0].shape[0])]
     # for i in range(len(samples)):
@@ -134,7 +149,7 @@ if __name__ == '__main__':
     # # plt.savefig('sample_single')
 
     # many_samples = list(itertools.chain.from_iterable(
-    #     create_sample(image_size=32, shape_complexity=5) for _ in range(1000)))  # Out of disk space?
+    #     create_sample(image_size=128, shape_complexity=5) for _ in range(1000)))  # Out of disk space?
     # # print(sum(x[0].nbytes + x[1].nbytes for x in many_samples))
     # np.save('dataset_large', many_samples)
 
