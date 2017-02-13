@@ -44,7 +44,7 @@ class Estimator():
             self.h_pool2 = max_pool_2x2(self.h_conv2)
 
         with tf.variable_scope('fc1'):
-            fc_size = reduce(lambda x, y:x * y, self.h_pool2.get_shape().as_list()[1:], 1)
+            fc_size = reduce(lambda x, y: x * y, self.h_pool2.get_shape().as_list()[1:], 1)
             self.W_fc1, self.b_fc1 = make_variables([fc_size, 1024])
             self.h_pool2_flat = tf.reshape(self.h_pool2, [-1, fc_size])
             self.h_fc1 = tf.nn.relu(tf.matmul(self.h_pool2_flat, self.W_fc1) + self.b_fc1)
@@ -99,29 +99,32 @@ if __name__ == '__main__':
 
         batch_size = 50
         for iteration in range(10000):
-            print('Iteration {}'.format(iteration))
+            if iteration % 50 == 0:
+                print('Iteration {}'.format(iteration))
 
             batch_indices = np.random.choice(training_data.shape[0], batch_size, replace=False)
             batch_x, batch_t = zip(*[generate.create_training_sample(image_size, vertices, truth) for vertices, truth in
                                      training_data[batch_indices]])
-            sess.run(est.train_op, {est.x:batch_x, est.targets:batch_t, est.keep_prob:0.7})
+            sess.run(est.train_op, {est.x: batch_x, est.targets: batch_t, est.keep_prob: 0.7})
 
             if iteration % 100 == 0:
                 [train_writer.add_summary(s, iteration) for s in sess.run([est.loss_summary, est.accuracy_summary],
-                    {est.x:batch_x, est.targets:batch_t, est.keep_prob:1.0})]
+                                                                          {est.x: batch_x, est.targets: batch_t,
+                                                                           est.keep_prob: 1.0})]
 
                 # Validation set
                 valid_x, valid_t = zip(
                     *[generate.create_training_sample(image_size, vertices, truth) for vertices, truth in
                       validation_data])
                 [valid_writer.add_summary(s, iteration) for s in sess.run([est.loss_summary, est.accuracy_summary],
-                    {est.x:valid_x, est.targets:valid_t, est.keep_prob:1.0})]
+                                                                          {est.x: valid_x, est.targets: valid_t,
+                                                                           est.keep_prob: 1.0})]
 
             if iteration % 1000 == 0:
                 ious, failed_shapes = analyze.evaluate_iou(validation_data, sess, est)
-                # valid_writer.add_summary(sess.run(est.iou_histogram, {est.ious:np.array(ious)}), iteration)
+                # valid_writer.add_summary(sess.run(est.iou_histogram, {est.ious: np.array(ious)}), iteration)
                 valid_writer.add_summary(sess.run(tf.scalar_summary('IOU', sum(ious) / len(ious))), iteration)
                 valid_writer.add_summary(sess.run(tf.scalar_summary('Failed shapes', failed_shapes / valid_size)),
-                    iteration)
+                                         iteration)
 
         saver.save(sess, './results/model.ckpt')
