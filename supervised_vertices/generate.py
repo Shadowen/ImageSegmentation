@@ -4,6 +4,7 @@ import scipy.ndimage
 import scipy.spatial
 import skimage.measure
 import matplotlib.pyplot as plt
+from matplotlib.path import Path
 
 
 def create_valid_polygon(image_size, shape_complexity, min_area):
@@ -41,7 +42,9 @@ def create_training_sample(image_size, poly_verts, ground_truth, start_idx=None,
 
     history_mask = create_history_mask(poly_verts, num_points, image_size)
     cursor_mask = create_point_mask(poly_verts[num_points - 1], image_size)
-    state = np.stack([image, history_mask, cursor_mask], axis=2)
+    valid_mask = create_valid_mask(poly_verts, num_points, image_size)
+
+    state = np.stack([image, history_mask, cursor_mask, valid_mask], axis=2)
 
     next_point = np.array(poly_verts[num_points % total_num_verts])
 
@@ -62,11 +65,32 @@ def create_history_mask(vertices, num_points, image_size, use_lines=True):
             rr, cc = skimage.draw.line(*vertices[i - 1], *vertices[i])
             player_mask[rr, cc] = 1
         return player_mask
-    else:
+    else:  # TODO remove this?
         player_mask = np.zeros([image_size, image_size])
         for i in range(1, num_points):
             player_mask[tuple(vertices[i])] = 1
         return player_mask
+
+
+def create_valid_mask(vertices, num_points, image_size):
+    # TODO hacky
+    vertices = np.array(vertices)
+    valid_mask = np.zeros([image_size, image_size])
+    existing_path = Path(np.array(vertices[:num_points - 1]))  # Path up to n-1 points
+    for x in range(image_size):
+        for y in range(image_size):
+            new_path = Path(np.array([vertices[num_points - 1]] + [[x, y]]))  # n to n+1
+            if not existing_path.intersects_path(new_path):
+                valid_mask[x, y] = 1
+    # Capture points along n to n+1
+    dx, dy = vertices[num_points - 2][0] - vertices[num_points - 1][0], vertices[num_points - 2][1] - \
+             vertices[num_points - 1][1]
+    rr, cc = skimage.draw.line(vertices[num_points - 1][0], vertices[num_points - 1][1],
+                      vertices[num_points - 2][0] + image_size * dx, vertices[num_points - 2][0] + image_size * dy)
+    for i in range(len(rr)):
+        if 0 <= rr[i] < image_size and 0 <= cc[i] < image_size:
+            valid_mask[rr[i], cc[i]] = 0
+    return valid_mask
 
 
 def create_point_mask(point, image_size):
@@ -96,24 +120,32 @@ def create_image(ground_truth):
 
 if __name__ == '__main__':
     many_samples = [create_valid_polygon(image_size=32, shape_complexity=5, min_area=86) for _ in range(10000)]
+    for i in range(len(many_samples)):
+        for start in range(2, len(many_samples[i][0])):
+            plt.figure();
+            plt.imshow(create_history_mask(many_samples[i][0], start, 32), cmap='gray', interpolation='nearest')
+            valid_mask = create_valid_mask(many_samples[i][0], start, 32)
+            plt.figure()
+            plt.imshow(valid_mask, cmap='gray', interpolation='nearest')
+            plt.show(block=True)
 
-    from supervised_vertices.analyze import display_sample, display_samples
+from supervised_vertices.analyze import display_sample, display_samples
 
-    # for i in range(len(many_samples)):
-    #     x, truth = create_training_sample(32, *many_samples[i], start_idx=0, num_points=len(many_samples[i][0]))
-    #     display_sample(x, truth)
-    #     plt.show(block=True)
+# for i in range(len(many_samples)):
+#     x, truth = create_training_sample(32, *many_samples[i], start_idx=0, num_points=len(many_samples[i][0]))
+#     display_sample(x, truth)
+#     plt.show(block=True)
 
-    # for i in range(len(many_samples)):
-    #     xs = []
-    #     truths = []
-    #     for start in range(len(many_samples[i][0])):
-    #         for num in range(1, len(many_samples[i][0]) + 1):
-    #             print('start={}\tnum={}'.format(start, num))
-    #             x, truth = create_training_sample(32, *many_samples[i], start_idx=start, num_points=num)
-    #             xs.append(x)
-    #             truths.append(truth)
-    #     display_samples(xs, truths)
-    #     plt.show(block=True)
+# for i in range(len(many_samples)):
+#     xs = []
+#     truths = []
+#     for start in range(len(many_samples[i][0])):
+#         for num in range(1, len(many_samples[i][0]) + 1):
+#             print('start={}\tnum={}'.format(start, num))
+#             x, truth = create_training_sample(32, *many_samples[i], start_idx=start, num_points=num)
+#             xs.append(x)
+#             truths.append(truth)
+#     display_samples(xs, truths)
+#     plt.show(block=True)
 
-    np.save('dataset_polygons', many_samples)
+# np.save('dataset_polygons', many_samples)

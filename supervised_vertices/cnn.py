@@ -27,14 +27,14 @@ def max_pool_2x2(x):
 
 class Estimator():
     def __init__(self):
-        self.x = tf.placeholder(tf.float32, shape=[None, image_size, image_size, 3])
+        self.x = tf.placeholder(tf.float32, shape=[None, image_size, image_size, 4])
         self.keep_prob = tf.placeholder_with_default(1.0, [])
         self.targets = tf.placeholder(tf.int32, shape=[None, 2])
         self.targets_flat = self.targets[:, 0] * image_size + self.targets[:, 1]
         self.targets_onehot = tf.one_hot(self.targets_flat, image_size * image_size)
 
         with tf.variable_scope('conv1'):
-            self.W_conv1, self.b_conv1 = make_variables([5, 5, 3, image_size])
+            self.W_conv1, self.b_conv1 = make_variables([5, 5, self.x.get_shape().as_list()[-1], image_size])
             self.h_conv1 = tf.nn.relu(conv2d(self.x, self.W_conv1) + self.b_conv1)
             self.h_pool1 = max_pool_2x2(self.h_conv1)
 

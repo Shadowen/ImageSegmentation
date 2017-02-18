@@ -16,14 +16,14 @@ def display_sample(x, truth=None, prediction=None, return_tensor=False):
 
 
 def display_samples(x, ground_truths=None, predictions=None, return_tensor=False):
-    num_columns = 3 + (1 if ground_truths is not None else 0) + (1 if predictions is not None else 0)
+    num_columns = 4 + (1 if ground_truths is not None else 0) + (1 if predictions is not None else 0)
     fig, ax = plt.subplots(nrows=max(len(x), 2), ncols=num_columns, figsize=(10, 2 * max(len(x), 2)))
     [ax[0][e].set_title(t) for e, t in zip(range(num_columns),
-                                           ['Image', 'History', 'Cursor'] + (
+                                           ['Image', 'History', 'Cursor', 'Valid mask'] + (
                                                ['Truth'] if ground_truths is not None else []) + (
                                                ['Prediction'] if predictions is not None else []))]
     for i in range(len(x)):
-        for e in range(3):
+        for e in range(4):
             ax[i][e].axis('off')
             ax[i][e].imshow(x[i][:, :, e], cmap='gray', interpolation='nearest')
         if ground_truths is not None:
@@ -64,7 +64,8 @@ def visual_eval(vertices, ground_truth):
     for i in itertools.count():
         player_mask = generate.create_history_mask(verts_so_far, len(verts_so_far), image_size)
         cursor_mask = generate.create_point_mask(cursor, image_size)
-        state = np.stack([image, player_mask, cursor_mask], axis=2)
+        valid_mask = generate.create_valid_mask(verts_so_far, len(verts_so_far), image_size)
+        state = np.stack([image, player_mask, cursor_mask, valid_mask], axis=2)
         states.append(state)
 
         y, y_coords = sess.run([est.y, est.y_coords], {est.x: [state], est.keep_prob: 1.0})
@@ -106,10 +107,11 @@ def evaluate_iou(dataset, sess, est):
         predictions = []
         for i in itertools.count():
             history_mask = generate.create_history_mask(verts_so_far, len(verts_so_far), image_size)
-            history_mask = np.zeros_like(image)
-
+            # history_mask = np.zeros_like(image)
             cursor_mask = generate.create_point_mask(cursor, image_size)
-            state = np.stack([image, history_mask, cursor_mask], axis=2)
+            valid_mask = generate.create_valid_mask(np.array(verts_so_far), len(verts_so_far), image_size) # TODO hacky
+
+            state = np.stack([image, history_mask, cursor_mask, valid_mask], axis=2)
             states.append(state)
 
             y, y_coords = sess.run([est.y, est.y_coords], {est.x: [state], est.keep_prob: 1.0})
@@ -161,19 +163,18 @@ if __name__ == '__main__':
     with tf.Session() as sess:
         est = cnn.Estimator()
         saver = tf.train.Saver()
-        if not os.path.exists(('results')):
-            os.makedirs('results/')
-        train_writer = tf.train.SummaryWriter('./results/train', sess.graph)
-        valid_writer = tf.train.SummaryWriter('./results/valid')
-
+        # if not os.path.exists(('results')):
+        #     os.makedirs('results/')
+        # train_writer = tf.train.SummaryWriter('./results/train', sess.graph)
+        # valid_writer = tf.train.SummaryWriter('./results/valid')
+        #
         sess.run(tf.global_variables_initializer())
 
         saver.restore(sess, 'results/model.ckpt')
-
+        #
         for i in range(50):
             # visualize_weights(sess, est)
             visual_eval(*validation_data[i])
-
 
         ious, failed = evaluate_iou(validation_data, sess, est)
         print('IOU = {}, failed = {}'.format(sum(ious) / len(ious), failed))

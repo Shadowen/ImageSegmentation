@@ -65,6 +65,14 @@ IOU = 0.8219838139802708, failed = 139
 Point history (zeroed):
 IOU = 0.832699836324291, failed = 208
 
+
+Validity mask (line history, fixed):
+IOU = 0.760096910805428, failed = 118
+
 - Errors where the network appears to go in the wrong direction are because a single pixel is higher than the next point
 - Try spatial softmax? - convolution layers
     - Add a "valid moves" mask? multiply it in as a fixed constant near the last layer?
+
+smooth the ground truth
+RNN
+provide the first (final) point as input
