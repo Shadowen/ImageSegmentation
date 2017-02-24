@@ -65,14 +65,37 @@ IOU = 0.8219838139802708, failed = 139
 Point history (zeroed):
 IOU = 0.832699836324291, failed = 208
 
-
-Validity mask (line history, fixed):
-IOU = 0.760096910805428, failed = 118
+__Conclusion:__ the history mask does help reduce failures to close the shape. The line history mask is much better than the point history mask for this purpose.
 
 - Errors where the network appears to go in the wrong direction are because a single pixel is higher than the next point
 - Try spatial softmax? - convolution layers
     - Add a "valid moves" mask? multiply it in as a fixed constant near the last layer?
 
-smooth the ground truth
-RNN
-provide the first (final) point as input
+# Validity mask
+
+- ~~Try using a mask that indicates which points are valid outputs.~~
+
+Validity mask (line history, fixed):
+IOU = 0.760096910805428, failed = 118
+
+Results for the validity mask are inconclusive. Need to refine the validity mask implementation with some sort of ray tracing algorithm. TODO
+
+## Meeting notes
+- Smooth the ground truth with soft crossentropy
+- ~~Use an RNN~~
+- Try providing the point required to close the shape as an input
+
+# Recurrent Neural Network
+## Working RNN
+- Working CNN + RNN implementation; cross entropy is decreasing over at least 10k steps, but accuracy doesn't seem to be getting better
+
+### TODO
+- Add the image summaries back in
+- Add validation set measurements to rnn.py to see if it's working?
+- Run overnight
+- Try providing the first (final) point as input
+- "Upgrade" to multi-layer LSTM
+- Need to achieve 90%+ on simple polygons
+- Get running on the cluster
+- Test on Luis' dataset
+- Reinforcement learning (A3C)

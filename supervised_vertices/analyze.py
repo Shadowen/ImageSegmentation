@@ -16,14 +16,14 @@ def display_sample(x, truth=None, prediction=None, return_tensor=False):
 
 
 def display_samples(x, ground_truths=None, predictions=None, return_tensor=False):
-    num_columns = 4 + (1 if ground_truths is not None else 0) + (1 if predictions is not None else 0)
+    num_columns = x[0].shape[-1] + (1 if ground_truths is not None else 0) + (1 if predictions is not None else 0)
     fig, ax = plt.subplots(nrows=max(len(x), 2), ncols=num_columns, figsize=(10, 2 * max(len(x), 2)))
     [ax[0][e].set_title(t) for e, t in zip(range(num_columns),
-                                           ['Image', 'History', 'Cursor', 'Valid mask'] + (
+                                           ['Image', 'History', 'Cursor', 'Valid mask'][:x[0].shape[-1]] + (
                                                ['Truth'] if ground_truths is not None else []) + (
                                                ['Prediction'] if predictions is not None else []))]
     for i in range(len(x)):
-        for e in range(4):
+        for e in range(x[i].shape[-1]):
             ax[i][e].axis('off')
             ax[i][e].imshow(x[i][:, :, e], cmap='gray', interpolation='nearest')
         if ground_truths is not None:
@@ -109,7 +109,7 @@ def evaluate_iou(dataset, sess, est):
             history_mask = generate.create_history_mask(verts_so_far, len(verts_so_far), image_size)
             # history_mask = np.zeros_like(image)
             cursor_mask = generate.create_point_mask(cursor, image_size)
-            valid_mask = generate.create_valid_mask(np.array(verts_so_far), len(verts_so_far), image_size) # TODO hacky
+            valid_mask = generate.create_valid_mask(np.array(verts_so_far), len(verts_so_far), image_size)  # TODO hacky
 
             state = np.stack([image, history_mask, cursor_mask, valid_mask], axis=2)
             states.append(state)
@@ -161,7 +161,7 @@ if __name__ == '__main__':
     print('{} for training. {} for validation.'.format(len(training_data), len(validation_data)))
 
     with tf.Session() as sess:
-        est = cnn.Estimator()
+        est = cnn.CNN_Estimator()
         saver = tf.train.Saver()
         # if not os.path.exists(('results')):
         #     os.makedirs('results/')

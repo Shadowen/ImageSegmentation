@@ -25,7 +25,7 @@ def max_pool_2x2(x):
     return tf.nn.max_pool(x, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
 
 
-class Estimator():
+class CNN_Estimator():
     def __init__(self):
         self.x = tf.placeholder(tf.float32, shape=[None, image_size, image_size, 4])
         self.keep_prob = tf.placeholder_with_default(1.0, [])
@@ -88,7 +88,7 @@ if __name__ == '__main__':
     print('{} for training. {} for validation.'.format(len(training_data), len(validation_data)))
 
     with tf.Session() as sess:
-        est = Estimator()
+        est = CNN_Estimator()
         saver = tf.train.Saver()
         if not os.path.exists(('results')):
             os.makedirs('results/')
