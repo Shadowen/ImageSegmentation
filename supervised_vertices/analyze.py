@@ -151,30 +151,68 @@ def visualize_weights(sess, est):
             ax[i][e].imshow(W_conv1[:, :, i, e], cmap='gray', interpolation='nearest')
 
 
+# if __name__ == '__main__':
+#     data = np.load('dataset_polygons.npy')
+#     print('{} polygons loaded.'.format(data.shape[0]))
+#     valid_size = data.shape[0] // 10
+#     training_data = data[valid_size:]
+#     validation_data = data[:valid_size]
+#     del data  # Make sure we don't contaminate the training set
+#     print('{} for training. {} for validation.'.format(len(training_data), len(validation_data)))
+#
+#     with tf.Session() as sess:
+#         est = cnn.CNN_Estimator()
+#         saver = tf.train.Saver()
+#         # if not os.path.exists(('results')):
+#         #     os.makedirs('results/')
+#         # train_writer = tf.train.SummaryWriter('./results/train', sess.graph)
+#         # valid_writer = tf.train.SummaryWriter('./results/valid')
+#         #
+#         sess.run(tf.global_variables_initializer())
+#
+#         saver.restore(sess, 'results/model.ckpt')
+#         #
+#         for i in range(50):
+#             # visualize_weights(sess, est)
+#             visual_eval(*validation_data[i])
+#
+#         ious, failed = evaluate_iou(validation_data, sess, est)
+#         print('IOU = {}, failed = {}'.format(sum(ious) / len(ious), failed))
+
+
 if __name__ == '__main__':
-    data = np.load('dataset_polygons.npy')
-    print('{} polygons loaded.'.format(data.shape[0]))
-    valid_size = data.shape[0] // 10
-    training_data = data[valid_size:]
-    validation_data = data[:valid_size]
-    del data  # Make sure we don't contaminate the training set
-    print('{} for training. {} for validation.'.format(len(training_data), len(validation_data)))
+    import matplotlib.pyplot as plt
+    from supervised_vertices.Dataset import get_train_and_valid_datasets
+    import tensorflow as tf
+    from supervised_vertices.RNN_Estimator import RNN_Estimator
 
+    model = RNN_Estimator(max_timesteps=5, init_scale=0.1)
     with tf.Session() as sess:
-        est = cnn.CNN_Estimator()
-        saver = tf.train.Saver()
-        # if not os.path.exists(('results')):
-        #     os.makedirs('results/')
-        # train_writer = tf.train.SummaryWriter('./results/train', sess.graph)
-        # valid_writer = tf.train.SummaryWriter('./results/valid')
-        #
-        sess.run(tf.global_variables_initializer())
+        logdir = 'rnn_2'
+        saver = tf.train.Saver(keep_checkpoint_every_n_hours=1, max_to_keep=2)
 
-        saver.restore(sess, 'results/model.ckpt')
-        #
-        for i in range(50):
-            # visualize_weights(sess, est)
-            visual_eval(*validation_data[i])
+        saver.restore(sess, save_path=logdir + '/model.ckpt')
 
-        ious, failed = evaluate_iou(validation_data, sess, est)
-        print('IOU = {}, failed = {}'.format(sum(ious) / len(ious), failed))
+        training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy')
+        d, x, t = training_set.get_batch(max_timesteps=5)
+        o = sess.run(model.predictions, feed_dict={model.sequence_length: d, model.inputs: x, model.targets: t})
+
+        batch_size, max_timesteps, _, _, _ = x.shape
+        for b in range(batch_size):
+            fig, ax = plt.subplots(nrows=5, ncols=max_timesteps, figsize=(10, 2 * max(len(x), 2)))
+            [ax[0][t].set_title(d[b]) for t in range(max_timesteps)]
+
+            for timestep in range(x[b].shape[0]):
+                for i in range(x[b].shape[-1]):
+                    ax[i][timestep].axis('off')
+                    ax[i][timestep].imshow(x[b, timestep, :, :, i], cmap='gray', interpolation='nearest')
+
+                i += 1
+                ax[i][timestep].axis('off')
+                ax[i][timestep].imshow(t[b, timestep, :, :], cmap='gray', interpolation='nearest')
+
+                i += 1
+                ax[i][timestep].axis('off')
+                ax[i][timestep].imshow(o[b, timestep, :, :], cmap='gray', interpolation='nearest')
+
+            plt.show(block=True)

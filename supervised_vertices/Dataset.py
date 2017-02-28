@@ -31,17 +31,17 @@ class Dataset():
         """
         batch_indices = np.random.choice(self.data.shape[0], batch_size, replace=False)
 
-        batch_d = np.zeros([batch_size])
+        batch_d = np.zeros([batch_size], dtype=np.int32)
         batch_x = np.zeros([batch_size, max_timesteps, 32, 32, 3])
         batch_t = np.zeros([batch_size, max_timesteps, 32, 32])
         for idx, (vertices, truth) in enumerate(self.data[batch_indices]):
-            d, x, t = self.create_sample_sequence(32, vertices, truth)
+            d, x, t = self._create_sample_sequence(32, vertices, truth)
             batch_d[idx] = d
             batch_x[idx, :d, ::] = x
             batch_t[idx, :d, ::] = t
         return batch_d, batch_x, batch_t
 
-    def create_sample_sequence(self, image_size, poly_verts, ground_truth):
+    def _create_sample_sequence(self, image_size, poly_verts, ground_truth):
         total_num_verts = len(poly_verts)
 
         image = _create_image(ground_truth)
@@ -101,3 +101,27 @@ def _create_point_mask(point, image_size):
     mask = np.zeros([image_size, image_size])
     mask[tuple(point)] = 1
     return mask
+
+
+if __name__ == '__main__':
+    import matplotlib.pyplot as plt
+
+    training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy')
+    d, x, t = training_set.get_batch()
+
+    batch_size, max_timesteps, _, _, _ = x.shape
+    for b in range(batch_size):
+        fig, ax = plt.subplots(nrows=4, ncols=max_timesteps, figsize=(10, 2 * max(len(x), 2)))
+        [ax[0][t].set_title(d[b]) for t in range(max_timesteps)]
+        # [ax[0][t].yaxis.ylabel(str(t)) for t in range(max_timesteps)]
+
+        for timestep in range(x[b].shape[0]):
+            for i in range(x[b].shape[-1]):
+                ax[i][timestep].axis('off')
+                ax[i][timestep].imshow(x[b, timestep, :, :, i], cmap='gray', interpolation='nearest')
+
+            i += 1
+            ax[i][timestep].axis('off')
+            ax[i][timestep].imshow(t[b, timestep, :, :], cmap='gray', interpolation='nearest')
+
+        plt.show(block=True)

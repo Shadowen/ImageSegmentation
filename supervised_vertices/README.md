@@ -90,12 +90,16 @@ Results for the validity mask are inconclusive. Need to refine the validity mask
 - Working CNN + RNN implementation; cross entropy is decreasing over at least 10k steps, but accuracy doesn't seem to be getting better
 
 ### TODO
-- Add the image summaries back in
-- Add validation set measurements to rnn.py to see if it's working?
-- Run overnight
+~~- Add the image summaries back in~~
+~~- Add validation set measurements to rnn.py to see if it's working?~~
+~~- "Upgrade" to multi-layer LSTM~~
+~~- Run overnight~~
+- Run on server
+- Histogram of errors
 - Try providing the first (final) point as input
-- "Upgrade" to multi-layer LSTM
 - Need to achieve 90%+ on simple polygons
 - Get running on the cluster
 - Test on Luis' dataset
 - Reinforcement learning (A3C)
+
+

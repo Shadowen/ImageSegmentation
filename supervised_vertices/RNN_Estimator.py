@@ -1,7 +1,9 @@
 import tensorflow as tf
-from supervised_vertices.cnn import *
 import operator
+from functools import reduce
 import io
+
+image_size = 32  # TODO get rid of this and make it cleaner
 
 
 class RNN_Estimator(object):
@@ -34,61 +36,65 @@ class RNN_Estimator(object):
         with tf.variable_scope('model', initializer=initializer):
             self._create_inference_graph()
             self._create_loss_graph()
-            self._create_optimizer(initial_learning_rate=1e-1, num_steps_per_decay=1000,
-                                   decay_rate=0.1, max_global_norm=1.0)
-            self._build_summaries()
+            self._create_optimizer(initial_learning_rate=1e-1, num_steps_per_decay=20000,
+                                   decay_rate=0.05, max_global_norm=1.0)
+        with tf.variable_scope('train'):
+            self._training_summaries, self._training_image_summaries = self._build_summaries()
+        with tf.variable_scope('valid'):
+            self._validation_summaries, self._validation_image_summaries = self._build_summaries()
 
     def _create_inference_graph(self):
         """ Create a CNN that feeds an RNN. """
 
+        self._batch_size = tf.shape(self.inputs, out_type=tf.int64)[0]
+
         self._inputs_unrolled = tf.reshape(self._inputs, shape=[-1] + self.input_shape)
-        self._targets_flat = tf.reshape(self._targets, shape=[-1] + [reduce(operator.mul, self.target_shape)])
+        self._targets_unrolled = tf.reshape(self._targets, shape=[-1] + [reduce(operator.mul, self.target_shape)])
 
         with tf.variable_scope('input_cnn'):
-            self.keep_prob = tf.placeholder_with_default(1.0, [])
+            self._drop_rate = tf.placeholder_with_default(0.0, shape=[])
 
             with tf.variable_scope('conv1'):
-                self._W_conv1, self._b_conv1 = make_variables(
-                    [5, 5, self._inputs_unrolled.get_shape().as_list()[-1], 32])
-                self._h_conv1 = tf.nn.relu(conv2d(self._inputs_unrolled, self._W_conv1) + self._b_conv1)
-                self._h_pool1 = max_pool_2x2(self._h_conv1)
+                self._h_conv1 = tf.layers.conv2d(inputs=self._inputs_unrolled, filters=64, kernel_size=[5, 5],
+                                                 padding='same', activation=tf.nn.relu)
+                self._h_pool1 = tf.layers.max_pooling2d(inputs=self._h_conv1, pool_size=[2, 2], strides=2)
 
             with tf.variable_scope('conv2'):
-                self._W_conv2, self._b_conv2 = make_variables([5, 5, 32, 64])
-                self._h_conv2 = tf.nn.relu(conv2d(self._h_pool1, self._W_conv2) + self._b_conv2)
-                self._h_pool2 = max_pool_2x2(self._h_conv2)
+                self._h_conv2 = tf.layers.conv2d(inputs=self._h_pool1, filters=128, kernel_size=[5, 5],
+                                                 padding='same', activation=tf.nn.relu)
+                self._h_pool2 = tf.layers.max_pooling2d(inputs=self._h_conv2, pool_size=[2, 2], strides=2)
 
             with tf.variable_scope('fc1'):
                 fc_size = reduce(operator.mul, self._h_pool2.get_shape().as_list()[1:], 1)
-                self._W_fc1, self._b_fc1 = make_variables([fc_size, 1024])
                 self._h_pool2_flat = tf.reshape(self._h_pool2, [-1, fc_size])
-                self._h_fc1 = tf.nn.relu(tf.matmul(self._h_pool2_flat, self._W_fc1) + self._b_fc1)
-                self._h_fc1_drop = tf.nn.dropout(self._h_fc1, self.keep_prob)
+                self._h_fc1 = tf.layers.dense(inputs=self._h_pool2_flat, units=fc_size, activation=tf.nn.relu)
+                self._h_fc1_drop = tf.layers.dropout(inputs=self._h_fc1, rate=self._drop_rate)
 
             with tf.variable_scope('fc2'):
-                self._W_fc2, self.b_fc2 = make_variables([1024, image_size * image_size])
-                self._y_unrolled = tf.matmul(self._h_fc1_drop, self._W_fc2) + self.b_fc2
-
-            self._y = tf.reshape(self._y_unrolled, shape=[-1, self.max_timesteps] + [image_size * image_size])
+                self._y_unrolled = tf.layers.dense(inputs=self._h_fc1_drop, units=image_size * image_size,
+                                                   activation=tf.nn.relu)
+                self._y = tf.reshape(self._y_unrolled, shape=[-1, self.max_timesteps] + [image_size * image_size])
 
         with tf.variable_scope('recurrent_network'):
             num_rnn_cells = 1024
-            cell = tf.nn.rnn_cell.BasicRNNCell(num_units=num_rnn_cells)
 
-            outputs, last_states = tf.nn.dynamic_rnn(cell, self._y, sequence_length=self._seq_length,
-                                                     dtype=tf.float32)
-            self._outputs = tf.reshape(outputs, shape=[-1, num_rnn_cells])
-            last_states = tf.reshape(last_states, shape=[-1, num_rnn_cells])
+            cell = tf.contrib.rnn.BasicLSTMCell(num_units=num_rnn_cells)
+            cell = tf.contrib.rnn.MultiRNNCell([cell] * 3)
 
-            hidden_layer_size = [reduce(operator.mul, self.target_shape)]
-            W_pred = tf.get_variable('W_pred',
-                                     shape=[num_rnn_cells] + hidden_layer_size)
-            b_pred = tf.get_variable('b_pred', shape=hidden_layer_size,
-                                     initializer=tf.constant_initializer(0.0))
+            rnn_outputs, last_states = tf.nn.dynamic_rnn(cell, self._y, sequence_length=self._seq_length,
+                                                         dtype=tf.float32)
+            rnn_outputs_unrolled = tf.reshape(rnn_outputs, shape=[-1, num_rnn_cells])
+            last_states_unrolled = tf.reshape(last_states, shape=[-1, num_rnn_cells])
 
-            self._predictions_unrolled = tf.add(tf.matmul(self._outputs, W_pred), b_pred, name='predictions')
-            self._predictions = tf.reshape(self._predictions_unrolled,
-                                           shape=[-1, self.max_timesteps] + self.target_shape)
+        with tf.variable_scope('output_layer'):
+            fc1 = tf.layers.dense(rnn_outputs_unrolled, units=4096,
+                                  activation=tf.nn.relu)
+            self._output_unrolled = tf.layers.dense(fc1,
+                                                    units=reduce(operator.mul, self.target_shape),
+                                                    activation=tf.nn.relu)
+
+            self._output = tf.reshape(self._output_unrolled,
+                                      shape=[-1, self.max_timesteps] + self.target_shape)
 
         self.softmax = tf.reshape(tf.nn.softmax(self.predictions), shape=[-1, image_size, image_size])
 
@@ -97,18 +103,27 @@ class RNN_Estimator(object):
 
         # Cross entropy loss
         with tf.variable_scope('loss'):
-            self.losses = tf.nn.softmax_cross_entropy_with_logits(self._outputs, self._targets_flat)
+            self.losses = tf.nn.softmax_cross_entropy_with_logits(logits=self._output_unrolled,
+                                                                  labels=self._targets_unrolled)
             self._loss = tf.reduce_mean(self.losses)
+
+        self._predictions_coords = [tf.mod(tf.argmax(self._output_unrolled, dimension=1), image_size),
+                                    tf.floordiv(tf.argmax(self._output_unrolled, dimension=1), image_size)]
+        self._predictions_coords = tf.stack(self._predictions_coords, axis=1)
+        self._target_coords = [tf.mod(tf.argmax(self._targets_unrolled, dimension=1), image_size),
+                               tf.floordiv(tf.argmax(self._targets_unrolled, dimension=1), image_size)]
+        self._target_coords = tf.stack(self._target_coords, axis=1)
+
+        # Number of pixels correct
+        with tf.variable_scope('accuracy'):
+            x_correct, y_correct = tf.split(tf.equal(self._predictions_coords, self._target_coords), 2, axis=1)
+            self._accuracy = tf.count_nonzero(tf.logical_and(x_correct, y_correct)) / (
+                2 * self._batch_size * self.max_timesteps)
 
         # L2 error
         with tf.variable_scope('error'):
-            self._y_coords = [tf.mod(tf.argmax(self._predictions_unrolled, dimension=1), image_size),
-                              tf.floordiv(tf.argmax(self._predictions_unrolled, dimension=1), image_size)]
-            self._y_coords = tf.stack(self._y_coords, axis=1)
-            self._target_coords = [tf.mod(tf.argmax(self._targets_flat, dimension=1), image_size),
-                                   tf.floordiv(tf.argmax(self._targets_flat, dimension=1), image_size)]
-            self._target_coords = tf.stack(self._target_coords, axis=1)
-            self._individual_error = tf.sqrt(tf.to_float(tf.reduce_sum((self._y_coords - self._target_coords) ** 2, 1)))
+            self._individual_error = tf.sqrt(
+                tf.to_float(tf.reduce_sum((self._predictions_coords - self._target_coords) ** 2, 1)))
             self._error = tf.reduce_mean(self._individual_error)
 
     def _create_optimizer(self, initial_learning_rate, num_steps_per_decay,
@@ -131,9 +146,9 @@ class RNN_Estimator(object):
         """
 
         trainables = tf.trainable_variables()
-        grads = tf.gradients(self.loss, trainables)
-        grads, _ = tf.clip_by_global_norm(grads, clip_norm=max_global_norm)
-        grad_var_pairs = zip(grads, trainables)
+        self._grads = tf.gradients(self.loss, trainables)
+        self._grads, _ = tf.clip_by_global_norm(self._grads, clip_norm=max_global_norm)
+        grad_var_pairs = zip(self._grads, trainables)
 
         global_step = tf.Variable(0, name='global_step', trainable=False)
         self._learning_rate = tf.train.exponential_decay(initial_learning_rate, global_step, num_steps_per_decay,
@@ -144,20 +159,20 @@ class RNN_Estimator(object):
 
     def _build_summaries(self):
         """Creates summary operations from existing Tensors"""
-        self._learning_rate_summary = tf.summary.scalar('learning_rate', self._learning_rate)
-        self._loss_summary = tf.summary.scalar('loss', self._loss)
-        self._error_summary = tf.summary.scalar('error', self._error)
-        self._training_summaries = tf.summary.merge(
-            [self._learning_rate_summary, self._loss_summary, self._error_summary])
+        learning_rate_summary = tf.summary.scalar('learning_rate', self._learning_rate)
+        loss_summary = tf.summary.scalar('loss', self._loss)
+        grad_norm_summary = tf.summary.scalar('grad_norm', sum(tf.norm(g)for g in self._grads))
+        accuracy_summary = tf.summary.scalar('accuracy', self._accuracy)
+        error_summary = tf.summary.scalar('error', self._error)
+        scalar_summaries = tf.summary.merge(
+            [learning_rate_summary, loss_summary, accuracy_summary, error_summary, grad_norm_summary])
 
-        self._input_visualization_summary = tf.summary.image("Inputs", self._inputs_unrolled)
-        self._output_visualization_summary = tf.summary.image("Outputs", tf.expand_dims(self.softmax, dim=3))
-        self._image_summaries = tf.summary.merge(
-            [self._input_visualization_summary, self._output_visualization_summary])
+        input_visualization_summary = tf.summary.image("Inputs", self._inputs_unrolled)
+        output_visualization_summary = tf.summary.image("Outputs", tf.expand_dims(self.softmax, dim=3))
+        image_summaries = tf.summary.merge(
+            [input_visualization_summary, output_visualization_summary])
 
-    @property
-    def training_summaries(self):
-        return self._training_summaries
+        return scalar_summaries, image_summaries
 
     @property
     def inputs(self):
@@ -182,7 +197,7 @@ class RNN_Estimator(object):
     @property
     def predictions(self):
         """ An n-D float32 Tensor with shape `[batch_size, max_duration, target_size]`. """
-        return self._predictions
+        return self._output
 
     @property
     def loss(self):
@@ -200,5 +215,17 @@ class RNN_Estimator(object):
         return self._train_op
 
     @property
-    def image_summaries(self):
-        return self._image_summaries
+    def training_summaries(self):
+        return self._training_summaries
+
+    @property
+    def training_image_summaries(self):
+        return self._training_image_summaries
+
+    @property
+    def validation_summaries(self):
+        return self._validation_summaries
+
+    @property
+    def validation_image_summaries(self):
+        return self._validation_image_summaries
