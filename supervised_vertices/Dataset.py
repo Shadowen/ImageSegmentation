@@ -19,7 +19,7 @@ class Dataset():
     def __init__(self, data):
         self.data = data
 
-    def get_batch(self, batch_size=50, max_timesteps=10):
+    def get_batch(self, batch_size=50, max_timesteps=5):
         """
         :param batch_size:
         :param max_timesteps:
@@ -63,6 +63,25 @@ class Dataset():
 
         return total_num_verts, inputs, outputs
 
+    def create_input_for_test(self):
+        batch_indices = np.random.choice(self.data.shape[0], batch_size, replace=False)
+        image_size = 32
+
+        for idx, (vertices, ground_truth) in enumerate(self.data[batch_indices]):
+            total_num_verts = len(poly_verts)
+
+            image = _create_image(ground_truth)
+            start_idx = np.random.randint(total_num_verts + 1)
+            # Probably should optimize this with a numpy array and clever math. Use np.roll
+            poly_verts = poly_verts[start_idx:] + poly_verts[:start_idx]
+
+            history_mask = _create_history_mask(poly_verts, 1, image_size)
+            cursor_mask = _create_point_mask(poly_verts[0], image_size)
+
+            state = np.stack([image, history_mask, cursor_mask], axis=2)
+
+            yield state
+
 
 def _create_image(ground_truth):
     """ Apply distortion to the ground truth to generate the image the algorithm will see. """
@@ -87,7 +106,7 @@ def _create_history_mask(vertices, num_points, image_size, use_lines=True):
     if use_lines:
         player_mask = np.zeros([image_size, image_size])
         for i in range(1, num_points):
-            rr, cc = skimage.draw.line(*vertices[i - 1], *vertices[i])
+            rr, cc = skimage.draw.line(vertices[i - 1][0], vertices[i - 1][1], vertices[i][0], vertices[i][1])
             player_mask[rr, cc] = 1
         return player_mask
     else:  # TODO remove this?
@@ -100,6 +119,13 @@ def _create_history_mask(vertices, num_points, image_size, use_lines=True):
 def _create_point_mask(point, image_size):
     mask = np.zeros([image_size, image_size])
     mask[tuple(point)] = 1
+    return mask
+
+
+def _create_shape_mask(vertices, image_size):
+    mask = np.zeros([image_size, image_size])
+    rr, cc = skimage.draw.polygon(*zip(*vertices))
+    mask[rr, cc] = 1
     return mask
 
 

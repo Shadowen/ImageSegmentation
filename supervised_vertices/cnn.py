@@ -3,7 +3,7 @@ import tensorflow as tf
 from supervised_vertices import generate
 from functools import reduce
 import os
-from supervised_vertices import analyze
+from supervised_vertices.analyze import evaluate_iou
 
 image_size = 32
 
@@ -121,7 +121,7 @@ if __name__ == '__main__':
                                                                            est.keep_prob: 1.0})]
 
             if iteration % 1000 == 0:
-                ious, failed_shapes = analyze.evaluate_iou(validation_data, sess, est)
+                ious, failed_shapes = evaluate_iou(validation_data, sess, est)
                 # valid_writer.add_summary(sess.run(est.iou_histogram, {est.ious: np.array(ious)}), iteration)
                 valid_writer.add_summary(sess.run(tf.scalar_summary('IOU', sum(ious) / len(ious))), iteration)
                 valid_writer.add_summary(sess.run(tf.scalar_summary('Failed shapes', failed_shapes / valid_size)),

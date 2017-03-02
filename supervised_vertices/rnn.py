@@ -44,6 +44,14 @@ def train(sess, model, training_set, validation_set, num_optimization_steps, log
             summary_writer.add_summary(validation_summaries, global_step=step)
             summary_writer.add_summary(validation_image_summaries, global_step=step)
 
+            # IOU
+            failed_shapes, iou = evaluate_iou(sess, model, training_set)
+            iou_summaries = sess.run(model._training_iou_summary, {model.failures: failed_shapes, model.iou: iou})
+            summary_writer.add_summary(iou_summaries, global_step=step)
+            failed_shapes, iou = evaluate_iou(sess, model, validation_set)
+            iou_summaries = sess.run(model._validation_iou_summary, {model.failures: failed_shapes, model.iou: iou})
+            summary_writer.add_summary(iou_summaries, global_step=step)
+
         # Save
         if step % 1000 == 0:
             saver.save(sess, logdir + '/model.ckpt')

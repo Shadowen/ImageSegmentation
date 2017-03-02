@@ -1,11 +1,7 @@
-import tensorflow as tf
 import numpy as np
 import io
 import itertools
-import matplotlib.pyplot as plt
 from supervised_vertices import generate
-from supervised_vertices import cnn
-import os
 
 image_size = 32
 

@@ -1,7 +1,7 @@
+from __future__ import print_function, division
 import tensorflow as tf
 import operator
 from functools import reduce
-import io
 
 image_size = 32  # TODO get rid of this and make it cleaner
 
@@ -30,6 +30,9 @@ class RNN_Estimator(object):
         # A Tensor of shape [None, max_timesteps, ...]
         self._targets = tf.placeholder(tf.float32, shape=[None, max_timesteps] + self.target_shape,
                                        name='targets')
+        # A scalar
+        self.iou = tf.placeholder(dtype=tf.float32, shape=[], name='iou')
+        self.failures = tf.placeholder(dtype=tf.float32, shape=[], name='failure_rate')
 
         ## Fetch Vars
         initializer = tf.random_uniform_initializer(-init_scale, init_scale)
@@ -39,9 +42,9 @@ class RNN_Estimator(object):
             self._create_optimizer(initial_learning_rate=1e-1, num_steps_per_decay=20000,
                                    decay_rate=0.05, max_global_norm=1.0)
         with tf.variable_scope('train'):
-            self._training_summaries, self._training_image_summaries = self._build_summaries()
+            self._training_summaries, self._training_image_summaries, self._training_iou_summaries = self._build_summaries()
         with tf.variable_scope('valid'):
-            self._validation_summaries, self._validation_image_summaries = self._build_summaries()
+            self._validation_summaries, self._validation_image_summaries, self._validation_iou_summaries = self._build_summaries()
 
     def _create_inference_graph(self):
         """ Create a CNN that feeds an RNN. """
@@ -81,10 +84,10 @@ class RNN_Estimator(object):
             cell = tf.contrib.rnn.BasicLSTMCell(num_units=num_rnn_cells)
             cell = tf.contrib.rnn.MultiRNNCell([cell] * 3)
 
-            rnn_outputs, last_states = tf.nn.dynamic_rnn(cell, self._y, sequence_length=self._seq_length,
-                                                         dtype=tf.float32)
+            rnn_outputs, self._last_states = tf.nn.dynamic_rnn(cell, self._y, sequence_length=self._seq_length,
+                                                               dtype=tf.float32)
             rnn_outputs_unrolled = tf.reshape(rnn_outputs, shape=[-1, num_rnn_cells])
-            last_states_unrolled = tf.reshape(last_states, shape=[-1, num_rnn_cells])
+            last_states_unrolled = tf.reshape(self._last_states, shape=[-1, num_rnn_cells])
 
         with tf.variable_scope('output_layer'):
             fc1 = tf.layers.dense(rnn_outputs_unrolled, units=4096,
@@ -118,7 +121,7 @@ class RNN_Estimator(object):
         with tf.variable_scope('accuracy'):
             x_correct, y_correct = tf.split(tf.equal(self._predictions_coords, self._target_coords), 2, axis=1)
             self._accuracy = tf.count_nonzero(tf.logical_and(x_correct, y_correct)) / (
-                2 * self._batch_size * self.max_timesteps)
+                self._batch_size * self.max_timesteps)
 
         # L2 error
         with tf.variable_scope('error'):
@@ -161,7 +164,7 @@ class RNN_Estimator(object):
         """Creates summary operations from existing Tensors"""
         learning_rate_summary = tf.summary.scalar('learning_rate', self._learning_rate)
         loss_summary = tf.summary.scalar('loss', self._loss)
-        grad_norm_summary = tf.summary.scalar('grad_norm', sum(tf.norm(g)for g in self._grads))
+        grad_norm_summary = tf.summary.scalar('grad_norm', sum(tf.norm(g) for g in self._grads))
         accuracy_summary = tf.summary.scalar('accuracy', self._accuracy)
         error_summary = tf.summary.scalar('error', self._error)
         scalar_summaries = tf.summary.merge(
@@ -172,7 +175,11 @@ class RNN_Estimator(object):
         image_summaries = tf.summary.merge(
             [input_visualization_summary, output_visualization_summary])
 
-        return scalar_summaries, image_summaries
+        failure_summary = tf.summary.scalar('failure_rate', self.failure_rate)
+        iou_summary = tf.summary.scalar('iou', self.iou)
+        iou_summaries = tf.summary.merge([failure_summary, iou_summary])
+
+        return scalar_summaries, image_summaries, iou_summaries
 
     @property
     def inputs(self):
@@ -229,3 +236,55 @@ class RNN_Estimator(object):
     @property
     def validation_image_summaries(self):
         return self._validation_image_summaries
+
+
+# TODO encapsulate this somewhere, hopefully entirely inside TensorFlow if possible
+def evaluate_iou(sess, est, dataset):
+    from supervised_vertices import generate, analyze
+    import itertools
+    import numpy as np
+    from supervised_vertices.Dataset import _create_image, _create_history_mask, _create_point_mask, _create_shape_mask
+
+    # IOU
+    failed_shapes = 0
+    num_iou = 0
+    ious = []
+    batch_size = 50
+    for b in range(batch_size):
+        vertices, ground_truth = dataset.data[b]
+
+        image = _create_image(ground_truth)
+        # Probably should optimize this with a numpy array and clever math. Use np.roll
+        start_idx = np.random.randint(len(vertices))
+        poly_verts = vertices[start_idx:] + vertices[:start_idx]
+        cursor = poly_verts[0]
+        verts_so_far = [cursor]
+
+        predictions = []
+        inputs = np.zeros([1, 5, 32, 32, 3])
+        for t in itertools.count():
+            history_mask = _create_history_mask(verts_so_far, len(verts_so_far), image_size)
+            cursor_mask = _create_point_mask(cursor, image_size)
+            state = np.stack([image, history_mask, cursor_mask], axis=2)
+
+            inputs[0, t, ::] = state
+            pred, pred_coords = sess.run([est._output_unrolled, est._predictions_coords],
+                                         {est.sequence_length: np.ones([1]) * (t + 1), est.inputs: inputs})
+            predictions.append(pred[t])
+
+            cursor = tuple(reversed(pred_coords[t].tolist()))
+            verts_so_far.append(cursor)
+
+            distance = np.linalg.norm(np.array(poly_verts[0]) - np.array(cursor))
+            if distance < 2:
+                predicted_polygon = _create_shape_mask(verts_so_far, image_size)
+                iou = analyze.calculate_iou(ground_truth, predicted_polygon)
+                ious.append(iou)
+                num_iou += 1
+                break
+            elif t + 1 >= 5:
+                failed_shapes += 1
+                # num_iou += 1
+                # ious.append(0)
+                break
+    return failed_shapes, sum(ious) / num_iou if num_iou > 0 else -1

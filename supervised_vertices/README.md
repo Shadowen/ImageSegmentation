@@ -94,12 +94,30 @@ Results for the validity mask are inconclusive. Need to refine the validity mask
 ~~- Add validation set measurements to rnn.py to see if it's working?~~
 ~~- "Upgrade" to multi-layer LSTM~~
 ~~- Run overnight~~
-- Run on server
+~~- Run on server~~
+
+# 1 March 2017
+- CNN + RNN
+- Overnight run on server shows improvement in validation loss and error after ~5000 iterations
+- Minimum of ~1.5 pixels mean validation error
+- Pictures still show that the network is unsure which point is next to pick, but it no longer goes backwards and re-picks already chosen points
+
+### TODO
+~~- Debug accuracy measurement~~
+Probably just a Python 2 problem; use `from __future__ import division` as temporary fix?
+~~- Program IOU for RNN~~
+95%+ training iou and approximately 75% validation IOU
+- Check failure rate
+- Investigate durations for d > 3
+- Clean up IOU code - use Tensorflow variable sharing to build both the "training network" and "inference network"
+- IOU image summaries
+
+### TODO
 - Histogram of errors
 - Try providing the first (final) point as input
 - Need to achieve 90%+ on simple polygons
 - Get running on the cluster
 - Test on Luis' dataset
 - Reinforcement learning (A3C)
-
-
+    - Use IOU instead of V/Q-network
+    - Only train the policy network!

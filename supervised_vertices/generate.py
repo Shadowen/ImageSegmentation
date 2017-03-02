@@ -3,8 +3,6 @@ import skimage.draw
 import scipy.ndimage
 import scipy.spatial
 import skimage.measure
-import matplotlib.pyplot as plt
-from matplotlib.path import Path
 
 
 def create_valid_polygon(image_size, shape_complexity, min_area, reduction_tolerance):
