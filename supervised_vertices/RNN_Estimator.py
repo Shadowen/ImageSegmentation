@@ -1,4 +1,4 @@
-from __future__ import print_function, division
+from __future__ import division
 import tensorflow as tf
 import operator
 from functools import reduce
@@ -175,7 +175,7 @@ class RNN_Estimator(object):
         image_summaries = tf.summary.merge(
             [input_visualization_summary, output_visualization_summary])
 
-        failure_summary = tf.summary.scalar('failure_rate', self.failure_rate)
+        failure_summary = tf.summary.scalar('failure_rate', self.failures)
         iou_summary = tf.summary.scalar('iou', self.iou)
         iou_summaries = tf.summary.merge([failure_summary, iou_summary])
 

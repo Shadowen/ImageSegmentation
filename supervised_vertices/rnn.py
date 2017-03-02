@@ -1,3 +1,4 @@
+from __future__ import print_function
 from supervised_vertices.RNN_Estimator import *
 import tensorflow as tf
 import os
@@ -46,10 +47,10 @@ def train(sess, model, training_set, validation_set, num_optimization_steps, log
 
             # IOU
             failed_shapes, iou = evaluate_iou(sess, model, training_set)
-            iou_summaries = sess.run(model._training_iou_summary, {model.failures: failed_shapes, model.iou: iou})
+            iou_summaries = sess.run(model._training_iou_summaries, {model.failures: failed_shapes, model.iou: iou})
             summary_writer.add_summary(iou_summaries, global_step=step)
             failed_shapes, iou = evaluate_iou(sess, model, validation_set)
-            iou_summaries = sess.run(model._validation_iou_summary, {model.failures: failed_shapes, model.iou: iou})
+            iou_summaries = sess.run(model._validation_iou_summaries, {model.failures: failed_shapes, model.iou: iou})
             summary_writer.add_summary(iou_summaries, global_step=step)
 
         # Save
