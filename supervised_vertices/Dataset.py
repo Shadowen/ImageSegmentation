@@ -8,8 +8,7 @@ def get_train_and_valid_datasets(filename):
     :param filename:
     :return:
     """
-    # if 'ais' in filename:
-    if True:
+    if 'ais' in filename:
         import json
         import os
         import matplotlib.image as mpimage

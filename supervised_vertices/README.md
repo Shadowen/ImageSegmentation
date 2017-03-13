@@ -114,11 +114,11 @@ Probably just a Python 2 problem; use `from __future__ import division` as tempo
 
 # 2 March 2017
 - Working policy gradients implementation (on CartPole-v1)
-~~- Investigate why NaNs appear in the optimizer when changing TD-target to TD-error..?~~
+- ~~Investigate why NaNs appear in the optimizer when changing TD-target to TD-error..?~~
 Fixed - should just use softmax_cross_entropy_with_logits function which gets rid of singularities in the softmax
 
 # 5 March 2017
-~~- Move the learning into the episode loop~~
+- ~~Move the learning into the episode loop~~
 
 
 # 10 March 2017
@@ -129,13 +129,19 @@ Fixed - should just use softmax_cross_entropy_with_logits function which gets ri
 ~~- Advanced optimizers seem to be less stable?~~
     - Use smaller learning rate
 
+# 13 March 2017
+- ~~Talk to Tingwu~~
+- Install Universe/Docker
+- Get running on the cluster
+    - Need to bring your own Python install? Ask Relu
+- Test on Luis' dataset
 
 ### TODO
 - Reinforcement learning (A3C)
+    - ~~Debug the A3C algorithm. It seems to peak in performance much lower than the paper reported~~ Use the [Universe starter agent](https://github.com/openai/universe-starter-agent)
     - Pretrain the policy network
-    - Add teacher to RL by inserting permanent samples into replay memory
+    - Running out of memory... :( try on the server
+    - Add teacher to RL by inserting permanent samples into replay memory - remember this only works for off-policy methods!
 - Try providing the first (final) point as input
 - Need to achieve 90%+ on simple polygons
-- Get running on the cluster
-- Test on Luis' dataset
     

@@ -1,4 +1,3 @@
-from __future__ import print_function
 from supervised_vertices.RNN_Estimator import *
 import tensorflow as tf
 import os

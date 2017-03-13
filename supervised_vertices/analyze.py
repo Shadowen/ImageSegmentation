@@ -1,7 +1,6 @@
 import numpy as np
 import io
 import itertools
-from supervised_vertices import generate
 
 image_size = 32
 
@@ -12,6 +11,8 @@ def display_sample(x, truth=None, prediction=None, return_tensor=False):
 
 
 def display_samples(x, ground_truths=None, predictions=None, return_tensor=False):
+    from supervised_vertices.Dataset import _create_shape_mask, _create_point_mask, _create_history_mask, _create_image
+
     num_columns = x[0].shape[-1] + (1 if ground_truths is not None else 0) + (1 if predictions is not None else 0)
     fig, ax = plt.subplots(nrows=max(len(x), 2), ncols=num_columns, figsize=(10, 2 * max(len(x), 2)))
     [ax[0][e].set_title(t) for e, t in zip(range(num_columns),
@@ -25,7 +26,7 @@ def display_samples(x, ground_truths=None, predictions=None, return_tensor=False
         if ground_truths is not None:
             e += 1
             ax[i][e].axis('off')
-            ax[i][e].imshow(generate.create_point_mask(ground_truths[i], image_size=image_size), cmap='gray',
+            ax[i][e].imshow(_create_point_mask(ground_truths[i], image_size=image_size), cmap='gray',
                             interpolation='nearest')
         if predictions is not None:
             e += 1
@@ -44,9 +45,11 @@ def display_samples(x, ground_truths=None, predictions=None, return_tensor=False
 
 
 def visual_eval(vertices, ground_truth):
+    from supervised_vertices.Dataset import _create_shape_mask, _create_point_mask, _create_history_mask, _create_image
+
     plt.ion()
     # Create training examples out of it
-    image = generate.create_image(ground_truth)
+    image = _create_image(ground_truth)
 
     start_idx = 0
     poly_verts = vertices[start_idx:] + vertices[:start_idx]
@@ -58,9 +61,9 @@ def visual_eval(vertices, ground_truth):
     states = []
     predictions = []
     for i in itertools.count():
-        player_mask = generate.create_history_mask(verts_so_far, len(verts_so_far), image_size)
-        cursor_mask = generate.create_point_mask(cursor, image_size)
-        valid_mask = generate.create_valid_mask(verts_so_far, len(verts_so_far), image_size)
+        player_mask = _create_history_mask(verts_so_far, len(verts_so_far), image_size)
+        cursor_mask = _create_point_mask(cursor, image_size)
+        valid_mask = _create_valid_mask(verts_so_far, len(verts_so_far), image_size)
         state = np.stack([image, player_mask, cursor_mask, valid_mask], axis=2)
         states.append(state)
 
@@ -74,7 +77,7 @@ def visual_eval(vertices, ground_truth):
         if distance < 2 or i > 5:
             break
 
-    predicted_polygon = generate.create_shape_mask(verts_so_far, image_size)
+    predicted_polygon = _create_shape_mask(verts_so_far, image_size)
     print('IOU={}'.format(calculate_iou(ground_truth, predicted_polygon)))
 
     # plt.figure()
@@ -85,7 +88,10 @@ def visual_eval(vertices, ground_truth):
 
 
 def evaluate_iou(dataset, sess, est, logdir=None):
-    from Dataset import _create_image, _create_history_mask, _create_point_mask, _create_shape_mask
+    # Make relative imports work from terminal
+    import sys
+    sys.path.append('.')
+    from supervised_vertices.Dataset import _create_image, _create_history_mask, _create_point_mask, _create_shape_mask
     import os
     import matplotlib.pyplot as plt
     import tensorflow as tf

@@ -4,6 +4,11 @@ from functools import reduce
 import os
 import shutil
 import operator
+
+# Make local imports work properly when running from terminal
+import sys
+
+sys.path.append('.')
 from supervised_vertices.analyze import evaluate_iou
 from supervised_vertices.Dataset import get_train_and_valid_datasets
 
@@ -39,6 +44,9 @@ class CNN_Estimator():
                 self.y_flat = tf.layers.dense(inputs=self._h_fc1_drop, units=image_size * image_size)
                 self.y = tf.reshape(self.y_flat, shape=[-1, image_size, image_size])
 
+        self._create_loss_graph()
+
+    def _create_loss_graph(self):
         # Calculate the loss
         self.losses = tf.nn.softmax_cross_entropy_with_logits(logits=self.y_flat, labels=self.targets_flat)
         self.loss_op = tf.reduce_mean(self.losses)
@@ -71,14 +79,14 @@ class CNN_Estimator():
 
 if __name__ == '__main__':
     # training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy')
-    training_set, validation_set = get_train_and_valid_datasets('/home/wesley/data/')
+    training_set, validation_set = get_train_and_valid_datasets('/ais/gobi4/wiki/polyrnn/data/shapes_texture')
 
     with tf.Session() as sess:
         global_step_op = tf.Variable(0, name='global_step', trainable=False)
         increment_global_step_op = tf.assign(global_step_op, global_step_op + 1)
         est = CNN_Estimator()
         saver = tf.train.Saver(max_to_keep=5, keep_checkpoint_every_n_hours=2)
-        logdir = 'cnn_test'
+        logdir = '/ais/gobi5/polyRL/cnn'
         load_from = ''
         latest_checkpoint = tf.train.latest_checkpoint(load_from)
         if os.path.exists(logdir):
