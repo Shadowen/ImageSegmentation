@@ -36,7 +36,7 @@ if __name__ == '__main__':
     from supervised_vertices import analyze
 
     many_samples = [
-        create_valid_polygon(image_size=32, shape_complexity=5, min_area=86, reduction_tolerance=20) for _
+        create_valid_polygon(image_size=32, shape_complexity=10, min_area=86, reduction_tolerance=20) for _
         in range(10000)]
 
     # Preview regular shapes

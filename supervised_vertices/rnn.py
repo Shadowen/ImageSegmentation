@@ -27,7 +27,7 @@ def train(sess, model, training_set, validation_set, num_optimization_steps, log
     sess.run(tf.global_variables_initializer())
     for step in range(num_optimization_steps):
         print('\rStep %d.' % (step + 1), end='')
-        durations, inputs, targets = training_set.get_batch(batch_size=50, max_timesteps=5)
+        durations, inputs, targets = training_set.get_batch_for_rnn(batch_size=50, max_timesteps=5)
         training_summaries, training_image_summaries, _ = sess.run(
             [model.training_summaries, model.training_image_summaries, model.train_op],
             {model.sequence_length: durations, model.inputs: inputs,
@@ -37,7 +37,7 @@ def train(sess, model, training_set, validation_set, num_optimization_steps, log
 
         # Validate
         if step % 100 == 0:
-            durations, inputs, targets = validation_set.get_batch(batch_size=50, max_timesteps=5)
+            durations, inputs, targets = validation_set.get_batch_for_rnn(batch_size=50, max_timesteps=5)
             validation_summaries, validation_image_summaries = sess.run(
                 [model.validation_summaries, model.validation_image_summaries],
                 {model.sequence_length: durations, model.inputs: inputs,

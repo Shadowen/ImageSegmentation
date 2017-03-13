@@ -287,4 +287,4 @@ def evaluate_iou(sess, est, dataset):
                 # num_iou += 1
                 # ious.append(0)
                 break
-    return failed_shapes, sum(ious) / num_iou if num_iou > 0 else -1
+    return failed_shapes / batch_size, sum(ious) / num_iou if num_iou > 0 else -1

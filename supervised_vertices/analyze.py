@@ -84,13 +84,22 @@ def visual_eval(vertices, ground_truth):
     display_samples(states, predictions=predictions)
 
 
-def evaluate_iou(dataset, sess, est):
+def evaluate_iou(dataset, sess, est, logdir=None):
+    from Dataset import _create_image, _create_history_mask, _create_point_mask, _create_shape_mask
+    import os
+    import matplotlib.pyplot as plt
+    import tensorflow as tf
+
+    if logdir:
+        global_step = sess.run(tf.contrib.framework.get_global_step())
+        os.makedirs(logdir + '/' + str(global_step))
+
     failed_shapes = 0
     num_iou = 0
     ious = []
-    for polygon_number, (vertices, ground_truth) in enumerate(dataset):
+    for polygon_number, (vertices, ground_truth) in enumerate(dataset.data):
         # Create training examples out of it
-        image = generate.create_image(ground_truth)
+        image = _create_image(ground_truth)
 
         start_idx = 0
         poly_verts = vertices[start_idx:] + vertices[:start_idx]
@@ -102,15 +111,13 @@ def evaluate_iou(dataset, sess, est):
         states = []
         predictions = []
         for i in itertools.count():
-            history_mask = generate.create_history_mask(verts_so_far, len(verts_so_far), image_size)
-            # history_mask = np.zeros_like(image)
-            cursor_mask = generate.create_point_mask(cursor, image_size)
-            valid_mask = generate.create_valid_mask(np.array(verts_so_far), len(verts_so_far), image_size)  # TODO hacky
+            history_mask = _create_history_mask(verts_so_far, len(verts_so_far), image_size)
+            cursor_mask = _create_point_mask(cursor, image_size)
 
-            state = np.stack([image, history_mask, cursor_mask, valid_mask], axis=2)
+            state = np.stack([image, history_mask, cursor_mask], axis=2)
             states.append(state)
 
-            y, y_coords = sess.run([est.y, est.y_coords], {est.x: [state], est.keep_prob: 1.0})
+            y, y_coords = sess.run([est.y, est.y_coords], {est.x: [state], est.drop_rate: 0})
             predictions.append(y[0])
 
             cursor = tuple(reversed(y_coords[0].tolist()))
@@ -118,7 +125,7 @@ def evaluate_iou(dataset, sess, est):
 
             distance = np.linalg.norm(np.array(poly_verts[0]) - np.array(cursor))
             if distance < 2:
-                predicted_polygon = generate.create_shape_mask(verts_so_far, image_size)
+                predicted_polygon = _create_shape_mask(verts_so_far, image_size)
                 iou = calculate_iou(ground_truth, predicted_polygon)
                 ious.append(iou)
                 num_iou += 1
@@ -128,6 +135,25 @@ def evaluate_iou(dataset, sess, est):
                 # num_iou += 1
                 # ious.append(0)
                 break
+
+        if logdir and polygon_number < 5:
+            fig, ax = plt.subplots(nrows=4, ncols=len(predictions))
+            fig.suptitle(str(iou))
+            for timestep in range(len(states)):
+                for i in range(states[0].shape[-1]):
+                    ax[i][timestep].axis('off')
+                    ax[i][timestep].imshow(states[timestep][:, :, i], cmap='gray', interpolation='nearest')
+
+                i += 1
+                t = _create_point_mask(poly_verts[timestep], image_size) if timestep < len(
+                    poly_verts) else np.zeros_like(predictions[timestep])
+                ax[i][timestep].axis('off')
+                ax[i][timestep].imshow(np.vstack([t[timestep], predictions[timestep], np.zeros_like(t[timestep])]),
+                                       cmap='gray', interpolation='nearest')
+
+            fig.savefig(logdir + '/' + str(global_step) + '/' + str(polygon_number))
+            plt.close(fig)
+
     return ious, failed_shapes
 
 
@@ -190,7 +216,7 @@ if __name__ == '__main__':
         saver.restore(sess, save_path=logdir + '/model.ckpt')
 
         training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy')
-        d, x, t = training_set.get_batch(max_timesteps=5)
+        d, x, t = training_set.get_batch_for_rnn(max_timesteps=5)
         o = sess.run(model.predictions, feed_dict={model.sequence_length: d, model.inputs: x, model.targets: t})
 
         batch_size, max_timesteps, _, _, _ = x.shape

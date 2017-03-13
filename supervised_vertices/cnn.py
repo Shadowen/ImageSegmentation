@@ -1,130 +1,122 @@
 import numpy as np
 import tensorflow as tf
-from supervised_vertices import generate
 from functools import reduce
 import os
+import shutil
+import operator
 from supervised_vertices.analyze import evaluate_iou
+from supervised_vertices.Dataset import get_train_and_valid_datasets
 
 image_size = 32
 
 
-def make_variables(shape):
-    initial_weights = tf.truncated_normal(shape, stddev=0.1)
-    weight_var = tf.Variable(name='weight', dtype=tf.float32, initial_value=initial_weights)
-    initial_biases = tf.constant(0.1, shape=[shape[-1]])
-    bias_var = tf.Variable(name='bias', dtype=tf.float32, initial_value=initial_biases)
-
-    return weight_var, bias_var
-
-
-def conv2d(x, W):
-    return tf.nn.conv2d(x, W, strides=[1, 1, 1, 1], padding='SAME')
-
-
-def max_pool_2x2(x):
-    return tf.nn.max_pool(x, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
-
-
 class CNN_Estimator():
     def __init__(self):
-        self.x = tf.placeholder(tf.float32, shape=[None, image_size, image_size, 4])
-        self.keep_prob = tf.placeholder_with_default(1.0, [])
-        self.targets = tf.placeholder(tf.int32, shape=[None, 2])
-        self.targets_flat = self.targets[:, 0] * image_size + self.targets[:, 1]
-        self.targets_onehot = tf.one_hot(self.targets_flat, image_size * image_size)
+        self.x = tf.placeholder(tf.float32, shape=[None, image_size, image_size, 3])
+        self.targets = tf.placeholder(tf.int32, shape=[None, image_size, image_size])
+        self.targets_flat = tf.reshape(self.targets, shape=[-1, image_size * image_size])
 
-        with tf.variable_scope('conv1'):
-            self.W_conv1, self.b_conv1 = make_variables([5, 5, self.x.get_shape().as_list()[-1], image_size])
-            self.h_conv1 = tf.nn.relu(conv2d(self.x, self.W_conv1) + self.b_conv1)
-            self.h_pool1 = max_pool_2x2(self.h_conv1)
+        with tf.variable_scope('input_cnn'):
+            self.drop_rate = tf.placeholder_with_default(0.0, shape=[])
 
-        with tf.variable_scope('conv2'):
-            self.W_conv2, self.b_conv2 = make_variables([5, 5, image_size, 64])
-            self.h_conv2 = tf.nn.relu(conv2d(self.h_pool1, self.W_conv2) + self.b_conv2)
-            self.h_pool2 = max_pool_2x2(self.h_conv2)
+            with tf.variable_scope('conv1'):
+                self._h_conv1 = tf.layers.conv2d(inputs=self.x, filters=16, kernel_size=[5, 5],
+                                                 padding='same', activation=tf.nn.relu)
+                self._h_pool1 = tf.layers.max_pooling2d(inputs=self._h_conv1, pool_size=[2, 2], strides=2)
 
-        with tf.variable_scope('fc1'):
-            fc_size = reduce(lambda x, y: x * y, self.h_pool2.get_shape().as_list()[1:], 1)
-            self.W_fc1, self.b_fc1 = make_variables([fc_size, 1024])
-            self.h_pool2_flat = tf.reshape(self.h_pool2, [-1, fc_size])
-            self.h_fc1 = tf.nn.relu(tf.matmul(self.h_pool2_flat, self.W_fc1) + self.b_fc1)
-            self.h_fc1_drop = tf.nn.dropout(self.h_fc1, self.keep_prob)
+            with tf.variable_scope('conv2'):
+                self._h_conv2 = tf.layers.conv2d(inputs=self._h_pool1, filters=32, kernel_size=[5, 5],
+                                                 padding='same', activation=tf.nn.relu)
+                self._h_pool2 = tf.layers.max_pooling2d(inputs=self._h_conv2, pool_size=[2, 2], strides=2)
 
-        with tf.variable_scope('fc2'):
-            self.W_fc2, self.b_fc2 = make_variables([1024, image_size * image_size])
-            self.y_flat = tf.matmul(self.h_fc1_drop, self.W_fc2) + self.b_fc2
-            self.y = tf.reshape(self.y_flat, shape=[-1, image_size, image_size])
-            self.softmax = tf.reshape(tf.nn.softmax(self.y_flat), shape=[-1, image_size, image_size])
+            with tf.variable_scope('fc1'):
+                fc_size = reduce(operator.mul, self._h_pool2.get_shape().as_list()[1:], 1)
+                self._h_pool2_flat = tf.reshape(self._h_pool2, [-1, fc_size])
+                self._h_fc1 = tf.layers.dense(inputs=self._h_pool2_flat, units=fc_size, activation=tf.nn.relu)
+                self._h_fc1_drop = tf.layers.dropout(inputs=self._h_fc1, rate=self.drop_rate)
+
+            with tf.variable_scope('fc2'):
+                self.y_flat = tf.layers.dense(inputs=self._h_fc1_drop, units=image_size * image_size)
+                self.y = tf.reshape(self.y_flat, shape=[-1, image_size, image_size])
 
         # Calculate the loss
-        self.losses = tf.nn.sparse_softmax_cross_entropy_with_logits(self.y_flat, self.targets_flat)
+        self.losses = tf.nn.softmax_cross_entropy_with_logits(logits=self.y_flat, labels=self.targets_flat)
         self.loss_op = tf.reduce_mean(self.losses)
         self.loss_summary = tf.summary.scalar('cross_entropy', self.loss_op)
-        self.train_op = tf.train.RMSPropOptimizer(0.001).minimize(self.loss_op)
+        self.learning_rate = tf.maximum(
+            tf.train.exponential_decay(0.001, tf.contrib.framework.get_global_step(), 1000, 0.9, staircase=True),
+            0.0001)
+        self.learning_rate_summary = tf.summary.scalar('learning_rate', self.learning_rate)
+        self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss_op)
 
         # Accuracy
         self.y_coords = [tf.mod(tf.argmax(self.y_flat, dimension=1), image_size),
                          tf.floordiv(tf.argmax(self.y_flat, dimension=1), image_size)]
         self.y_coords = tf.stack(self.y_coords, axis=1)
-        self.target_coords = [tf.to_int64(tf.mod(self.targets_flat, image_size)),
-                              tf.to_int64(tf.floordiv(self.targets_flat, image_size))]
+        self.target_coords = [tf.mod(tf.argmax(self.targets_flat, dimension=1), image_size),
+                              tf.floordiv(tf.argmax(self.targets_flat, dimension=1), image_size)]
         self.target_coords = tf.stack(self.target_coords, axis=1)
         self.individual_accuracy = tf.sqrt(tf.to_float(tf.reduce_sum((self.y_coords - self.target_coords) ** 2, 1)))
-        self.accuracy_op = tf.reduce_mean(self.individual_accuracy)
-        self.accuracy_summary = tf.summary.scalar('accuracy', self.accuracy_op)
+        self.error_op = tf.reduce_mean(self.individual_accuracy)
+        self.error_summary = tf.summary.scalar('error', self.error_op)
 
-        # IOU Histogram
-        # self.ious = tf.Variable(0)
-        # self.iou_histogram = tf.histogram_summary('IOU_histogram', self.ious)
+        # IOU
+        self.iou = tf.placeholder(dtype=tf.float32, shape=[])
+        self.iou_summary = tf.summary.scalar('IOU', self.iou)
+        self.ious = tf.placeholder(dtype=tf.float32, shape=[None])
+        self.iou_histogram = tf.summary.histogram('IOU_histogram', self.ious)
+        self.failed_shapes = tf.placeholder(dtype=tf.float32, shape=[])
+        self.failed_shapes_summary = tf.summary.scalar('Failed_shapes', self.failed_shapes)
 
 
 if __name__ == '__main__':
-    data = np.load('dataset_polygons.npy')
-    print('{} polygons loaded.'.format(data.shape[0]))
-    valid_size = data.shape[0] // 10
-    training_data = data[valid_size:]
-    validation_data = data[:valid_size]
-    del data  # Make sure we don't contaminate the training set
-    print('{} for training. {} for validation.'.format(len(training_data), len(validation_data)))
+    # training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy')
+    training_set, validation_set = get_train_and_valid_datasets('/home/wesley/data/')
 
     with tf.Session() as sess:
+        global_step_op = tf.Variable(0, name='global_step', trainable=False)
+        increment_global_step_op = tf.assign(global_step_op, global_step_op + 1)
         est = CNN_Estimator()
-        saver = tf.train.Saver()
-        if not os.path.exists(('results')):
-            os.makedirs('results/')
-        train_writer = tf.train.SummaryWriter('./results/train', sess.graph)
-        valid_writer = tf.train.SummaryWriter('./results/valid')
-
+        saver = tf.train.Saver(max_to_keep=5, keep_checkpoint_every_n_hours=2)
+        logdir = 'cnn_test'
+        load_from = ''
+        latest_checkpoint = tf.train.latest_checkpoint(load_from)
+        if os.path.exists(logdir):
+            shutil.rmtree(logdir)
+            os.makedirs(logdir)
         sess.run(tf.global_variables_initializer())
+        if latest_checkpoint:
+            print("Loading model checkpoint: {}".format(latest_checkpoint))
+            saver.restore(sess, latest_checkpoint)
+        train_writer = tf.summary.FileWriter(logdir + '/train', sess.graph)
+        valid_writer = tf.summary.FileWriter(logdir + '/valid')
 
         batch_size = 50
         for iteration in range(10000):
+            batch_x, batch_t = training_set.get_batch_for_cnn(batch_size)
+            loss, _, _, learning_rate_summary, loss_summary = sess.run(
+                [est.loss_op, est.train_op, increment_global_step_op, est.learning_rate_summary, est.loss_summary],
+                {est.x: batch_x, est.targets: batch_t, est.drop_rate: 0.3})
             if iteration % 50 == 0:
-                print('Iteration {}'.format(iteration))
-
-            batch_indices = np.random.choice(training_data.shape[0], batch_size, replace=False)
-            batch_x, batch_t = zip(*[generate.create_training_sample(image_size, vertices, truth) for vertices, truth in
-                                     training_data[batch_indices]])
-            sess.run(est.train_op, {est.x: batch_x, est.targets: batch_t, est.keep_prob: 0.7})
+                print('Iteration {}\t Loss={}'.format(iteration, loss))
 
             if iteration % 100 == 0:
-                [train_writer.add_summary(s, iteration) for s in sess.run([est.loss_summary, est.accuracy_summary],
-                                                                          {est.x: batch_x, est.targets: batch_t,
-                                                                           est.keep_prob: 1.0})]
-
+                train_writer.add_summary(learning_rate_summary, iteration)
+                train_writer.add_summary(loss_summary, iteration)
                 # Validation set
-                valid_x, valid_t = zip(
-                    *[generate.create_training_sample(image_size, vertices, truth) for vertices, truth in
-                      validation_data])
-                [valid_writer.add_summary(s, iteration) for s in sess.run([est.loss_summary, est.accuracy_summary],
+                valid_x, valid_t = validation_set.get_batch_for_cnn()
+                [valid_writer.add_summary(s, iteration) for s in sess.run([est.loss_summary, est.error_summary],
                                                                           {est.x: valid_x, est.targets: valid_t,
-                                                                           est.keep_prob: 1.0})]
+                                                                           est.drop_rate: 0})]
 
             if iteration % 1000 == 0:
-                ious, failed_shapes = evaluate_iou(validation_data, sess, est)
-                # valid_writer.add_summary(sess.run(est.iou_histogram, {est.ious: np.array(ious)}), iteration)
-                valid_writer.add_summary(sess.run(tf.scalar_summary('IOU', sum(ious) / len(ious))), iteration)
-                valid_writer.add_summary(sess.run(tf.scalar_summary('Failed shapes', failed_shapes / valid_size)),
-                                         iteration)
+                ious, failed_shapes = evaluate_iou(validation_set, sess, est)
+                valid_writer.add_summary(sess.run(est.iou_histogram, {est.ious: np.array(ious)}), iteration)
 
-        saver.save(sess, './results/model.ckpt')
+                valid_writer.add_summary(sess.run(est.iou_summary, {est.iou: sum(ious) / len(validation_set)}),
+                                         iteration)
+                valid_writer.add_summary(
+                    sess.run(est.failed_shapes_summary, {est.failed_shapes: failed_shapes / len(validation_set)}),
+                    iteration)
+
+                saver.save(sess, logdir + '/model')

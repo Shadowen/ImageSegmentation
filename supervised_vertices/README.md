@@ -112,12 +112,30 @@ Probably just a Python 2 problem; use `from __future__ import division` as tempo
 - Clean up IOU code - use Tensorflow variable sharing to build both the "training network" and "inference network"
 - IOU image summaries
 
+# 2 March 2017
+- Working policy gradients implementation (on CartPole-v1)
+~~- Investigate why NaNs appear in the optimizer when changing TD-target to TD-error..?~~
+Fixed - should just use softmax_cross_entropy_with_logits function which gets rid of singularities in the softmax
+
+# 5 March 2017
+~~- Move the learning into the episode loop~~
+
+
+# 10 March 2017
+- A3C on RandomShapesVertices-v0 goes from ~23% to ~28% IOU over 10 hours
+- Too slow, consider pretraining
+- Very high entropy still, what's the random baseline?
+- CNN can achieve down to 2% failure rate with ~80-85% IOU with new architecture/optimizer
+~~- Advanced optimizers seem to be less stable?~~
+    - Use smaller learning rate
+
+
 ### TODO
-- Histogram of errors
+- Reinforcement learning (A3C)
+    - Pretrain the policy network
+    - Add teacher to RL by inserting permanent samples into replay memory
 - Try providing the first (final) point as input
 - Need to achieve 90%+ on simple polygons
 - Get running on the cluster
 - Test on Luis' dataset
-- Reinforcement learning (A3C)
-    - Use IOU instead of V/Q-network
-    - Only train the policy network!
+    
