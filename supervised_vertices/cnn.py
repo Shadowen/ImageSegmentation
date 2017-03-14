@@ -12,14 +12,14 @@ sys.path.append('.')
 from supervised_vertices.analyze import evaluate_iou
 from supervised_vertices.Dataset import get_train_and_valid_datasets
 
-image_size = 32
-
 
 class CNN_Estimator():
-    def __init__(self):
-        self.x = tf.placeholder(tf.float32, shape=[None, image_size, image_size, 3])
-        self.targets = tf.placeholder(tf.int32, shape=[None, image_size, image_size])
-        self.targets_flat = tf.reshape(self.targets, shape=[-1, image_size * image_size])
+    def __init__(self, image_size):
+        self.image_size = image_size
+
+        self.x = tf.placeholder(tf.float32, shape=[None, self.image_size, self.image_size, 3])
+        self.targets = tf.placeholder(tf.int32, shape=[None, self.image_size, self.image_size])
+        self.targets_flat = tf.reshape(self.targets, shape=[-1, self.image_size * self.image_size])
 
         with tf.variable_scope('input_cnn'):
             self.drop_rate = tf.placeholder_with_default(0.0, shape=[])
@@ -41,8 +41,8 @@ class CNN_Estimator():
                 self._h_fc1_drop = tf.layers.dropout(inputs=self._h_fc1, rate=self.drop_rate)
 
             with tf.variable_scope('fc2'):
-                self.y_flat = tf.layers.dense(inputs=self._h_fc1_drop, units=image_size * image_size)
-                self.y = tf.reshape(self.y_flat, shape=[-1, image_size, image_size])
+                self.y_flat = tf.layers.dense(inputs=self._h_fc1_drop, units=self.image_size * self.image_size)
+                self.y = tf.reshape(self.y_flat, shape=[-1, self.image_size, self.image_size])
 
         self._create_loss_graph()
 
@@ -58,11 +58,11 @@ class CNN_Estimator():
         self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss_op)
 
         # Accuracy
-        self.y_coords = [tf.mod(tf.argmax(self.y_flat, dimension=1), image_size),
-                         tf.floordiv(tf.argmax(self.y_flat, dimension=1), image_size)]
+        self.y_coords = [tf.mod(tf.argmax(self.y_flat, dimension=1), self.image_size),
+                         tf.floordiv(tf.argmax(self.y_flat, dimension=1), self.image_size)]
         self.y_coords = tf.stack(self.y_coords, axis=1)
-        self.target_coords = [tf.mod(tf.argmax(self.targets_flat, dimension=1), image_size),
-                              tf.floordiv(tf.argmax(self.targets_flat, dimension=1), image_size)]
+        self.target_coords = [tf.mod(tf.argmax(self.targets_flat, dimension=1), self.image_size),
+                              tf.floordiv(tf.argmax(self.targets_flat, dimension=1), self.image_size)]
         self.target_coords = tf.stack(self.target_coords, axis=1)
         self.individual_accuracy = tf.sqrt(tf.to_float(tf.reduce_sum((self.y_coords - self.target_coords) ** 2, 1)))
         self.error_op = tf.reduce_mean(self.individual_accuracy)
@@ -79,14 +79,16 @@ class CNN_Estimator():
 
 if __name__ == '__main__':
     # training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy')
-    training_set, validation_set = get_train_and_valid_datasets('/ais/gobi4/wiki/polyrnn/data/shapes_texture')
+    training_set, validation_set = get_train_and_valid_datasets('/home/wesley/data', local=False)
+    # training_set, validation_set = get_train_and_valid_datasets('/ais/gobi4/wiki/polyrnn/data/shapes_texture', local=False)
 
     with tf.Session() as sess:
         global_step_op = tf.Variable(0, name='global_step', trainable=False)
         increment_global_step_op = tf.assign(global_step_op, global_step_op + 1)
-        est = CNN_Estimator()
+        est = CNN_Estimator(image_size=224)
         saver = tf.train.Saver(max_to_keep=5, keep_checkpoint_every_n_hours=2)
-        logdir = '/ais/gobi5/polyRL/cnn'
+        # logdir = '/ais/gobi5/polyRL/cnn'
+        logdir = '/tmp/cnn'
         load_from = ''
         latest_checkpoint = tf.train.latest_checkpoint(load_from)
         if os.path.exists(logdir):
@@ -99,7 +101,7 @@ if __name__ == '__main__':
         train_writer = tf.summary.FileWriter(logdir + '/train', sess.graph)
         valid_writer = tf.summary.FileWriter(logdir + '/valid')
 
-        batch_size = 50
+        batch_size = 1
         for iteration in range(10000):
             batch_x, batch_t = training_set.get_batch_for_cnn(batch_size)
             loss, _, _, learning_rate_summary, loss_summary = sess.run(

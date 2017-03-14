@@ -3,12 +3,12 @@ import skimage.measure
 import numpy as np
 
 
-def get_train_and_valid_datasets(filename):
+def get_train_and_valid_datasets(filename, local=True):
     """
     :param filename:
     :return:
     """
-    if 'ais' in filename:
+    if not local:
         import json
         import os
         import matplotlib.image as mpimage
@@ -30,13 +30,13 @@ def get_train_and_valid_datasets(filename):
                 image = mpimage.imread(patch_path)
                 # Convert to correct format
                 image_size = image.shape[0]
-                poly_verts = np.array(segmentation[0]) * image_size
+                # TODO(wheung) figure out why rounding is necessary for segmentation->poly_vert conversion
+                poly_verts = np.array(np.roll(np.array(segmentation[0]), 1, axis=1) * image_size).astype(np.int32)
                 ground_truth = _create_shape_mask(poly_verts, image_size)
                 # Store it
                 data.append((poly_verts, ground_truth))
                 images.append(image)
-
-            datasets.append(Dataset(np.array(data), images=np.array(images)))
+            datasets.append(Dataset(np.array(data), image_size=image_size, images=np.array(images)))
 
         print('{} polygons loaded from {}'.format((sum(map(len, datasets))), filename))
         print('{} for training. {} for validation.'.format(len(datasets[0]), len(datasets[1])))
@@ -51,13 +51,15 @@ def get_train_and_valid_datasets(filename):
         del data  # Make sure we don't contaminate the training set
         print('{} for training. {} for validation.'.format(len(training_data), len(validation_data)))
 
-        return Dataset(training_data), Dataset(validation_data)
+        # TODO(wheung) image size may vary, but not important for now
+        return Dataset(training_data, image_size=32), Dataset(validation_data, image_size=32)
 
 
 class Dataset():
-    def __init__(self, data, images=None):
+    def __init__(self, data, image_size, images=None):
         self.data = data
         self.images = images
+        self.image_size = image_size
 
     def get_batch_for_cnn(self, batch_size=50):
         """
@@ -70,12 +72,12 @@ class Dataset():
         """
         batch_indices = np.random.choice(self.data.shape[0], batch_size, replace=False)
 
-        batch_x = np.zeros([batch_size, 32, 32, 3])
-        batch_t = np.zeros([batch_size, 32, 32])
+        batch_x = np.zeros([batch_size, self.image_size, self.image_size, 3])
+        batch_t = np.zeros([batch_size, self.image_size, self.image_size])
         if self.images is not None:
             batch_images = self.images[batch_indices]
-            for idx, ((vertices, truth), image) in enumerate(zip(self.data[batch_indices]), batch_images):
-                x, t = self._create_sample(32, vertices, truth, image)
+            for idx, ((vertices, truth), image) in enumerate(zip(self.data[batch_indices], batch_images)):
+                x, t = self._create_sample(self.image_size, vertices, truth, image)
                 batch_x[idx] = x
                 batch_t[idx] = t
         else:
@@ -86,11 +88,10 @@ class Dataset():
     def _create_sample(self, image_size, poly_verts, ground_truth, image=None):
         total_num_verts = len(poly_verts)
 
-        image = image or _create_image(ground_truth)
+        image = image if image is not None else _create_image(ground_truth)
         start_idx = np.random.randint(total_num_verts + 1)
         num_verts = np.random.randint(total_num_verts)
-        # Probably should optimize this with a numpy array and clever math. Use np.roll
-        poly_verts = poly_verts[start_idx:] + poly_verts[:start_idx]
+        poly_verts = np.roll(poly_verts, start_idx, axis=0)
 
         history_mask = _create_history_mask(poly_verts, num_verts + 1, image_size)
         cursor_mask = _create_point_mask(poly_verts[num_verts], image_size)
@@ -113,10 +114,10 @@ class Dataset():
         batch_indices = np.random.choice(self.data.shape[0], batch_size, replace=False)
 
         batch_d = np.zeros([batch_size], dtype=np.int32)
-        batch_x = np.zeros([batch_size, max_timesteps, 32, 32, 3])
-        batch_t = np.zeros([batch_size, max_timesteps, 32, 32])
+        batch_x = np.zeros([batch_size, max_timesteps, self.image_size, self.image_size, 3])
+        batch_t = np.zeros([batch_size, max_timesteps, self.image_size, self.image_size])
         for idx, (vertices, truth) in enumerate(self.data[batch_indices]):
-            d, x, t = self._create_sample_sequence(32, vertices, truth)
+            d, x, t = self._create_sample_sequence(self.image_size, vertices, truth)
             batch_d[idx] = d
             batch_x[idx, :d, ::] = x
             batch_t[idx, :d, ::] = t
@@ -125,10 +126,9 @@ class Dataset():
     def _create_sample_sequence(self, image_size, poly_verts, ground_truth, image=None):
         total_num_verts = len(poly_verts)
 
-        image = image or _create_image(ground_truth)
+        image = image if image is not None else _create_image(ground_truth)
         start_idx = np.random.randint(total_num_verts + 1)
-        # Probably should optimize this with a numpy array and clever math. Use np.roll
-        poly_verts = poly_verts[start_idx:] + poly_verts[:start_idx]
+        poly_verts = np.roll(poly_verts, start_idx, axis=0)
 
         inputs = np.empty([total_num_verts, image_size, image_size, 3])
         outputs = np.empty([total_num_verts, image_size, image_size], dtype=np.uint16)
