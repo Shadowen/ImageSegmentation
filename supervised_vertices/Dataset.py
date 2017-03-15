@@ -67,12 +67,12 @@ class Dataset():
         :param max_timesteps:
         :return: tuple(batch_x, batch_t)
         where
-            batch_x is a NumPy array of shape [batch_size, 32, 32, 3]
+            batch_x is a NumPy array of shape [batch_size, 32, 32, 5]
             batch_t is a NumPy array of shape [batch_size, 32, 32]
         """
         batch_indices = np.random.choice(self.data.shape[0], batch_size, replace=False)
 
-        batch_x = np.zeros([batch_size, self.image_size, self.image_size, 3])
+        batch_x = np.zeros([batch_size, self.image_size, self.image_size, 5])
         batch_t = np.zeros([batch_size, self.image_size, self.image_size])
         if self.images is not None:
             batch_images = self.images[batch_indices]
@@ -96,7 +96,8 @@ class Dataset():
         history_mask = _create_history_mask(poly_verts, num_verts + 1, image_size)
         cursor_mask = _create_point_mask(poly_verts[num_verts], image_size)
 
-        state = np.stack([image, history_mask, cursor_mask], axis=2)
+        state = np.concatenate([image, np.expand_dims(history_mask, axis=2), np.expand_dims(cursor_mask, axis=2)],
+                               axis=2)
         next_point = np.array(poly_verts[(num_verts + 1) % total_num_verts])
 
         return state, _create_point_mask(next_point, image_size)

@@ -2,8 +2,6 @@ import numpy as np
 import io
 import itertools
 
-image_size = 32
-
 
 def display_sample(x, truth=None, prediction=None, return_tensor=False):
     return display_samples([x], ground_truths=[truth] if truth is not None else None,
@@ -105,11 +103,10 @@ def evaluate_iou(dataset, sess, est, logdir=None):
     ious = []
     for polygon_number, (vertices, ground_truth) in enumerate(dataset.data):
         # Create training examples out of it
-        image = _create_image(ground_truth)
+        image = dataset.images[polygon_number] if dataset.images is not None else _create_image(ground_truth)
 
         start_idx = 0
-        poly_verts = vertices[start_idx:] + vertices[:start_idx]
-        # Probably should optimize this with a numpy array and clever math. Use np.roll
+        poly_verts = np.roll(vertices, shift=start_idx, axis=0)
 
         cursor = poly_verts[0]
         verts_so_far = [cursor]
@@ -117,10 +114,11 @@ def evaluate_iou(dataset, sess, est, logdir=None):
         states = []
         predictions = []
         for i in itertools.count():
-            history_mask = _create_history_mask(verts_so_far, len(verts_so_far), image_size)
-            cursor_mask = _create_point_mask(cursor, image_size)
+            history_mask = _create_history_mask(verts_so_far, len(verts_so_far), dataset.image_size)
+            cursor_mask = _create_point_mask(cursor, dataset.image_size)
 
-            state = np.stack([image, history_mask, cursor_mask], axis=2)
+            state = np.concatenate([image, np.expand_dims(history_mask, axis=2), np.expand_dims(cursor_mask, axis=2)],
+                                   axis=2)
             states.append(state)
 
             y, y_coords = sess.run([est.y, est.y_coords], {est.x: [state], est.drop_rate: 0})
@@ -131,7 +129,7 @@ def evaluate_iou(dataset, sess, est, logdir=None):
 
             distance = np.linalg.norm(np.array(poly_verts[0]) - np.array(cursor))
             if distance < 2:
-                predicted_polygon = _create_shape_mask(verts_so_far, image_size)
+                predicted_polygon = _create_shape_mask(verts_so_far, dataset.image_size)
                 iou = calculate_iou(ground_truth, predicted_polygon)
                 ious.append(iou)
                 num_iou += 1
@@ -151,7 +149,7 @@ def evaluate_iou(dataset, sess, est, logdir=None):
                     ax[i][timestep].imshow(states[timestep][:, :, i], cmap='gray', interpolation='nearest')
 
                 i += 1
-                t = _create_point_mask(poly_verts[timestep], image_size) if timestep < len(
+                t = _create_point_mask(poly_verts[timestep], dataset.image_size) if timestep < len(
                     poly_verts) else np.zeros_like(predictions[timestep])
                 ax[i][timestep].axis('off')
                 ax[i][timestep].imshow(np.vstack([t[timestep], predictions[timestep], np.zeros_like(t[timestep])]),
