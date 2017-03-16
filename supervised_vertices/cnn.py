@@ -81,7 +81,8 @@ if __name__ == '__main__':
 
     # training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy')
     # training_set, validation_set = get_train_and_valid_datasets('/home/wesley/data', local=False)
-    training_set, validation_set = get_train_and_valid_datasets('/ais/gobi4/wiki/polyrnn/data/shapes_texture', local=False)
+    training_set, validation_set = get_train_and_valid_datasets('/ais/gobi4/wiki/polyrnn/data/shapes_texture',
+                                                                local=False)
 
     with tf.Session() as sess:
         global_step_op = tf.Variable(0, name='global_step', trainable=False)
@@ -129,5 +130,7 @@ if __name__ == '__main__':
                 valid_writer.add_summary(
                     sess.run(est.failed_shapes_summary, {est.failed_shapes: failed_shapes / len(validation_set)}),
                     iteration)
+                print('Iteration {}\t\t\t\t IOU={}\t FailedShapes={}'.format(iteration, sum(ious) / len(validation_set),
+                                                                       failed_shapes / len(validation_set)))
 
                 saver.save(sess, logdir + '/model')

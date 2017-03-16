@@ -128,28 +128,24 @@ Fixed - should just use softmax_cross_entropy_with_logits function which gets ri
 - CNN can achieve down to 2% failure rate with ~80-85% IOU with new architecture/optimizer
 ~~- Advanced optimizers seem to be less stable?~~
     - Use smaller learning rate
+    - ~~Need to achieve 90%+ on simple polygons~~
 
 # 13 March 2017
 - ~~Talk to Tingwu~~
 - Install Universe/Docker
-- Get running on the cluster
-    - Need to bring your own Python install? Ask Relu
-- Test on Luis' dataset
+- ~~Get CNN running on the cluster~~
+    - ~~Need to bring your own Python install?~~ Yes
 
-### TODO
+# 15 March 2017
 - Reinforcement learning (A3C)
     - ~~Debug the A3C algorithm. It seems to peak in performance much lower than the paper reported~~ Use the [Universe starter agent](https://github.com/openai/universe-starter-agent)
-    - Pretrain the policy network
-    - Running out of memory... :( try on the server
-    - Add teacher to RL by inserting permanent samples into replay memory - remember this only works for off-policy methods!
-- Try providing the first (final) point as input
-- Need to achieve 90%+ on simple polygons
-    
+    - 70% IOU* after 3 hours of training (4 threads) with the default network (4 conv layers of 32 filters + 256 cell LSTM)
+    - \* Dataset is different
 
-for i in range(20000):
-  batch = mnist.train.next_batch(50)
-  if i%10 == 0:
-    train_accuracy = accuracy.eval(feed_dict={
-        x:batch[0], y_: batch[1], keep_prob: 1.0})
-    print("step %d, training accuracy %g"%(i, train_accuracy))
-  train_step.run(feed_dict={x: batch[0], y_: batch[1], keep_prob: 0.5})
+### TODO
+- Clean up the universe install
+- Debug issue with RandomShapesVertices lines (extra lines?!)
+- Test on Luis' dataset
+- RL
+    - Pretrain the policy network
+- Try providing the first (final) point as input
