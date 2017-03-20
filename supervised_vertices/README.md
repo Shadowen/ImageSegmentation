@@ -174,16 +174,22 @@ For RL formulation, images are randomly generated at runtime. First step allows 
 2% of shapes fail to close within 10 time steps. Other shapes close, but have no area.
 
 In the following pictures, red is ground truth, green is estimate, and blue is cursor. Of course, everything overlaps so things come out in multiple colours...
+
 ![](readme_images/figure_1.png)
 ![](readme_images/figure_2.png)
 ![](readme_images/figure_3.png)
 ![](readme_images/figure_1-3.png)
+
 This next shape is closed, but results in a shape of area 0.
+
 ![](readme_images/figure_4.png)
+
 Some weirdness resulting from picking awkward points.
+
 ![](readme_images/figure_1-2.png)
 
 The following shape is concerning because it looks like the network is "memorizing" more than it is learning about shapes...
+
 ![](readme_images/figure_1-4.png)
 
 - I also tried using just the previous points as history (rather than line segments). This mainly seemed to make bad cases worse, as shapes had trouble closing
@@ -196,20 +202,20 @@ No existing runs.
 
 Never gets past forming simple squares that basically take up the whole image. I would say this is identical to the baseline.
 
-![](readme_images/individualImage 5.png)
-![](readme_images/individualImage 8.png)
-![](readme_images/individualImage 6.png)
-![](readme_images/individualImage 9.png)
-![](readme_images/individualImage 7.png)
+![](readme_images/individualImage_5.png)
+![](readme_images/individualImage_8.png)
+![](readme_images/individualImage_6.png)
+![](readme_images/individualImage_9.png)
+![](readme_images/individualImage_7.png)
 
 **A3C (LSTM): 80% IOU**
 
 Does this work better because it actually learns something about the shapes, or is it just because it has more parameters so it can memorize more shapes?
 
 ![](readme_images/individualImage.png)
-![](readme_images/individualImage 2.png)
-![](readme_images/individualImage 3.png)
-![](readme_images/individualImage 4.png)
+![](readme_images/individualImage_2.png)
+![](readme_images/individualImage_3.png)
+![](readme_images/individualImage_4.png)
 - Also tried squaring the reward to encourage 
 
 **Using 128x128 images:**
