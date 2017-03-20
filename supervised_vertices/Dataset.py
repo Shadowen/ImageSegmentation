@@ -72,7 +72,7 @@ class Dataset():
         """
         batch_indices = np.random.choice(self.data.shape[0], batch_size, replace=False)
 
-        batch_x = np.zeros([batch_size, self.image_size, self.image_size, 5])
+        batch_x = np.zeros([batch_size, self.image_size, self.image_size, 3])
         batch_t = np.zeros([batch_size, self.image_size, self.image_size])
         if self.images is not None:
             batch_images = self.images[batch_indices]
@@ -81,14 +81,17 @@ class Dataset():
                 batch_x[idx] = x
                 batch_t[idx] = t
         else:
-            raise NotImplementedError()
+            for idx, (vertices, truth) in enumerate(self.data[batch_indices]):
+                x, t = self._create_sample(self.image_size, vertices, truth)
+                batch_x[idx] = x
+                batch_t[idx] = t
 
         return batch_x, batch_t
 
     def _create_sample(self, image_size, poly_verts, ground_truth, image=None):
         total_num_verts = len(poly_verts)
 
-        image = image if image is not None else _create_image(ground_truth)
+        image = image if image is not None else np.expand_dims(_create_image(ground_truth), axis=2)
         start_idx = np.random.randint(total_num_verts + 1)
         num_verts = np.random.randint(total_num_verts)
         poly_verts = np.roll(poly_verts, start_idx, axis=0)
@@ -127,7 +130,7 @@ class Dataset():
     def _create_sample_sequence(self, image_size, poly_verts, ground_truth, image=None):
         total_num_verts = len(poly_verts)
 
-        image = image if image is not None else _create_image(ground_truth)
+        image = image if image is not None else np.expand_dims(_create_image(ground_truth), axis=2)
         start_idx = np.random.randint(total_num_verts + 1)
         poly_verts = np.roll(poly_verts, start_idx, axis=0)
 
@@ -187,7 +190,7 @@ def _create_image(ground_truth):
     return image
 
 
-def _create_history_mask(vertices, num_points, image_size, use_lines=True):
+def _create_history_mask(vertices, num_points, image_size, use_lines=False):
     if use_lines:
         player_mask = np.zeros([image_size, image_size])
         for i in range(1, num_points):

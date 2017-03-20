@@ -17,7 +17,7 @@ class CNN_Estimator():
     def __init__(self, image_size):
         self.image_size = image_size
 
-        self.x = tf.placeholder(tf.float32, shape=[None, self.image_size, self.image_size, 5])
+        self.x = tf.placeholder(tf.float32, shape=[None, self.image_size, self.image_size, 3])
         self.targets = tf.placeholder(tf.int32, shape=[None, self.image_size, self.image_size])
         self.targets_flat = tf.reshape(self.targets, shape=[-1, self.image_size * self.image_size])
 
@@ -27,21 +27,25 @@ class CNN_Estimator():
             with tf.variable_scope('conv1'):
                 self._h_conv1 = tf.layers.conv2d(inputs=self.x, filters=16, kernel_size=[5, 5],
                                                  padding='same', activation=tf.nn.relu)
-                self._h_pool1 = tf.layers.max_pooling2d(inputs=self._h_conv1, pool_size=[2, 2], strides=2)
+                # self._h_pool1 = tf.layers.max_pooling2d(inputs=self._h_conv1, pool_size=[2, 2], strides=2)
 
             with tf.variable_scope('conv2'):
-                self._h_conv2 = tf.layers.conv2d(inputs=self._h_pool1, filters=32, kernel_size=[5, 5],
+                self._h_conv2 = tf.layers.conv2d(inputs=self._h_conv1, filters=32, kernel_size=[3, 3],
                                                  padding='same', activation=tf.nn.relu)
-                self._h_pool2 = tf.layers.max_pooling2d(inputs=self._h_conv2, pool_size=[2, 2], strides=2)
+                # self._h_pool2 = tf.layers.max_pooling2d(inputs=self._h_conv2, pool_size=[2, 2], strides=2)
 
-            with tf.variable_scope('fc1'):
-                fc_size = reduce(operator.mul, self._h_pool2.get_shape().as_list()[1:], 1)
-                self._h_pool2_flat = tf.reshape(self._h_pool2, [-1, fc_size])
-                self._h_fc1 = tf.layers.dense(inputs=self._h_pool2_flat, units=512, activation=tf.nn.relu)
-                self._h_fc1_drop = tf.layers.dropout(inputs=self._h_fc1, rate=self.drop_rate)
+            with tf.variable_scope('conv3'):
+                self._h_conv3 = tf.layers.conv2d(inputs=self._h_conv1, filters=32, kernel_size=[3, 3],
+                                                 padding='same', activation=tf.nn.relu)
+                fc_size = reduce(operator.mul, self._h_conv3.get_shape().as_list()[1:], 1)
+                self._h_pool3_flat = tf.reshape(self._h_conv3, [-1, fc_size])
+
+            # with tf.variable_scope('fc1'):
+            #     self._h_fc1 = tf.layers.dense(inputs=self._h_pool2_flat, units=512, activation=tf.nn.relu)
+            #     self._h_fc1_drop = tf.layers.dropout(inputs=self._h_fc1, rate=self.drop_rate)
 
             with tf.variable_scope('fc2'):
-                self.y_flat = tf.layers.dense(inputs=self._h_fc1_drop, units=self.image_size * self.image_size)
+                self.y_flat = tf.layers.dense(inputs=self._h_pool3_flat, units=self.image_size * self.image_size)
                 self.y = tf.reshape(self.y_flat, shape=[-1, self.image_size, self.image_size])
 
         self._create_loss_graph()
@@ -79,18 +83,18 @@ class CNN_Estimator():
 
 if __name__ == '__main__':
 
-    # training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy')
+    training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy')
     # training_set, validation_set = get_train_and_valid_datasets('/home/wesley/data', local=False)
-    training_set, validation_set = get_train_and_valid_datasets('/ais/gobi4/wiki/polyrnn/data/shapes_texture',
-                                                                local=False)
+    # training_set, validation_set = get_train_and_valid_datasets('/ais/gobi4/wiki/polyrnn/data/shapes_texture',
+    #                                                             local=False)
 
     with tf.Session() as sess:
         global_step_op = tf.Variable(0, name='global_step', trainable=False)
         increment_global_step_op = tf.assign(global_step_op, global_step_op + 1)
-        est = CNN_Estimator(image_size=224)
+        est = CNN_Estimator(image_size=32)
         saver = tf.train.Saver(max_to_keep=5, keep_checkpoint_every_n_hours=2)
-        logdir = '/ais/gobi5/polyRL/cnn'
-        # logdir = '/tmp/cnn'
+        # logdir = '/ais/gobi5/polyRL/cnn'
+        logdir = 'cnn_points'
         load_from = ''
         latest_checkpoint = tf.train.latest_checkpoint(load_from)
         if os.path.exists(logdir):
@@ -131,6 +135,6 @@ if __name__ == '__main__':
                     sess.run(est.failed_shapes_summary, {est.failed_shapes: failed_shapes / len(validation_set)}),
                     iteration)
                 print('Iteration {}\t\t\t\t IOU={}\t FailedShapes={}'.format(iteration, sum(ious) / len(validation_set),
-                                                                       failed_shapes / len(validation_set)))
+                                                                             failed_shapes / len(validation_set)))
 
                 saver.save(sess, logdir + '/model')

@@ -137,15 +137,106 @@ Fixed - should just use softmax_cross_entropy_with_logits function which gets ri
     - ~~Need to bring your own Python install?~~ Yes
 
 # 15 March 2017
-- Reinforcement learning (A3C)
+- Reinforcement learning (A3C) https://arxiv.org/pdf/1602.01783.pdf
     - ~~Debug the A3C algorithm. It seems to peak in performance much lower than the paper reported~~ Use the [Universe starter agent](https://github.com/openai/universe-starter-agent)
     - 70% IOU* after 3 hours of training (4 threads) with the default network (4 conv layers of 32 filters + 256 cell LSTM)
     - \* Dataset is different
+    
+# 16 March 2017
+- ~~Clean up the universe install~~
+- ~~Debug issue with RandomShapesVertices lines (extra lines?!)~~
+- ~~Test on Luis' dataset~~
+
+# 17 March 2017
+- ~80% IOU using squared reward (A3C)
+- ~~Generate a eligibility trace-like image~~
+
+---
+
+# Summary
+Using 32x32 images. Data is randomly generated at runtime.
+
+## Methodology
+Pick (10) points at random. Draw a convex hull around them. This is ground truth (and image).
+
+Input data is image, history (lines previously drawn), and cursor (previous point chosen).
+For both methods, the shape is closed when the line segment crosses any previous line segment or after 10 time steps.
+
+For supervised learning formulation, the next vertex is provided at every time step. Random batches across a training set of 9000 images are provided. Validation is performed on a smaller set (1000 images).
+
+For RL formulation, images are randomly generated at runtime. First step allows any point to be chosen. This places the cursor. Subsequent steps draw a line segment from the cursor to the point chosen, then move the cursor. Reward is IOU at end of episode.
+
+## Results
+**Baseline (Use one optimal rectangle always): 61% IOU**
+
+**Supervised (CNN): 80-85% IOU**
+
+2% of shapes fail to close within 10 time steps. Other shapes close, but have no area.
+
+In the following pictures, red is ground truth, green is estimate, and blue is cursor. Of course, everything overlaps so things come out in multiple colours...
+![](readme_images/figure_1.png)
+![](readme_images/figure_2.png)
+![](readme_images/figure_3.png)
+![](readme_images/figure_1-3.png)
+This next shape is closed, but results in a shape of area 0.
+![](readme_images/figure_4.png)
+Some weirdness resulting from picking awkward points.
+![](readme_images/figure_1-2.png)
+
+The following shape is concerning because it looks like the network is "memorizing" more than it is learning about shapes...
+![](readme_images/figure_1-4.png)
+
+- I also tried using just the previous points as history (rather than line segments). This mainly seemed to make bad cases worse, as shapes had trouble closing
+
+**Supervised (LSTM)**
+
+No existing runs.
+
+**A3C (CNN): 60% IOU**
+
+Never gets past forming simple squares that basically take up the whole image. I would say this is identical to the baseline.
+
+![](readme_images/individualImage 5.png)
+![](readme_images/individualImage 8.png)
+![](readme_images/individualImage 6.png)
+![](readme_images/individualImage 9.png)
+![](readme_images/individualImage 7.png)
+
+**A3C (LSTM): 80% IOU**
+
+Does this work better because it actually learns something about the shapes, or is it just because it has more parameters so it can memorize more shapes?
+
+![](readme_images/individualImage.png)
+![](readme_images/individualImage 2.png)
+![](readme_images/individualImage 3.png)
+![](readme_images/individualImage 4.png)
+- Also tried squaring the reward to encourage 
+
+**Using 128x128 images:**
+
+A3C(LSTM + squared reward)
+
+---
+
+### Papers
+#### Image Segmentation
+- [Fully Convolutional Networks](https://people.eecs.berkeley.edu/~jonlong/long_shelhamer_fcn.pdf)
+- [SegNet: Encoder-Decoder Architecture](https://arxiv.org/pdf/1511.00561.pdf)
+#### Reinforcement Learning
+- [Asynchronous Methods for Deep RL](https://arxiv.org/pdf/1602.01783.pdf)
+- [Generalized Advantage Estimation](https://arxiv.org/pdf/1506.02438.pdf)
 
 ### TODO
-- Clean up the universe install
-- Debug issue with RandomShapesVertices lines (extra lines?!)
-- Test on Luis' dataset
+- Figure out if scipy is drawing just the interior of the shape and if we need to compensate by adding the outline to `create_shape_mask()`
+- Summaries
+    - Actions taken
+    - better/debugged logits heatmap/overlay?
+    - How many shapes fail to close
+    - failure cases - maybe do this after training?
+- What kind of architecture do we use? 2 FC layers at the end is impossibly huge
+    - 224**4 parameters!
+    - Try architecture inspired by [FCN](https://people.eecs.berkeley.edu/~jonlong/long_shelhamer_fcn.pdf)
 - RL
+    - Measure how close the first (or nth) point is to the perimeter of the shape by perpendicular distance
     - Pretrain the policy network
 - Try providing the first (final) point as input

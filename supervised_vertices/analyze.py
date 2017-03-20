@@ -85,78 +85,100 @@ def visual_eval(vertices, ground_truth):
     display_samples(states, predictions=predictions)
 
 
-def evaluate_iou(dataset, sess, est, logdir=None):
+def evaluate_iou(dataset, sess, est, show_images=False, show_intermediate_images=False):
+    import numpy as np
+
+    def perp(a):
+        b = np.empty_like(a)
+        b[0] = -a[1]
+        b[1] = a[0]
+        return b
+
+    # line segment a given by endpoints a1, a2
+    # line segment b given by endpoints b1, b2
+    # return
+    def seg_intersect(a1, a2, b1, b2):
+        if np.all(a1 == b1) or np.all(a1 == b2):
+            return True, a1
+        if np.all(a2 == b1) or np.all(a2 == b2):
+            return True, a2
+
+        da = a2 - a1
+        db = b2 - b1
+        dp = a1 - b1
+        dap = perp(da)
+        denom = np.dot(dap, db)
+        if denom == 0:
+            return False, None
+
+        num = np.dot(dap, dp)
+        intersection = (num / denom.astype(float)) * db + b1
+        does_intersect = min(a1[0], a2[0]) <= intersection[0] <= max(a1[0], a2[0]) and min(b1[0], b2[0]) <= \
+                                                                                       intersection[
+                                                                                           0] <= max(b1[0], b2[0])
+        return does_intersect, intersection
+
+    import matplotlib.pyplot as plt
     # Make relative imports work from terminal
     import sys
     sys.path.append('.')
     from supervised_vertices.Dataset import _create_image, _create_history_mask, _create_point_mask, _create_shape_mask
-    import os
-    import matplotlib.pyplot as plt
-    import tensorflow as tf
-
-    if logdir:
-        global_step = sess.run(tf.contrib.framework.get_global_step())
-        os.makedirs(logdir + '/' + str(global_step))
 
     failed_shapes = 0
-    num_iou = 0
     ious = []
     for polygon_number, (vertices, ground_truth) in enumerate(dataset.data):
         # Create training examples out of it
-        image = dataset.images[polygon_number] if dataset.images is not None else _create_image(ground_truth)
+        image = dataset.images[polygon_number] if dataset.images is not None else np.expand_dims(
+            _create_image(ground_truth), axis=2)
 
-        start_idx = 0
+        start_idx = np.random.randint(len(vertices))
         poly_verts = np.roll(vertices, shift=start_idx, axis=0)
 
         cursor = poly_verts[0]
         verts_so_far = [cursor]
 
-        states = []
-        predictions = []
-        for i in itertools.count():
+        for timestep in itertools.count():
             history_mask = _create_history_mask(verts_so_far, len(verts_so_far), dataset.image_size)
             cursor_mask = _create_point_mask(cursor, dataset.image_size)
 
             state = np.concatenate([image, np.expand_dims(history_mask, axis=2), np.expand_dims(cursor_mask, axis=2)],
                                    axis=2)
-            states.append(state)
+            if show_intermediate_images:
+                plt.imshow(state, interpolation='nearest')
+                plt.show(block=True)
 
-            y, y_coords = sess.run([est.y, est.y_coords], {est.x: [state], est.drop_rate: 0})
-            predictions.append(y[0])
-
+            y, y_coords = sess.run([est.y, est.y_coords], {est.x: [state]})
             cursor = tuple(reversed(y_coords[0].tolist()))
+
+            if timestep >= 7:
+                failed_shapes += 1
+                break
+            # Self intersecting shape
+            should_break = False
+            for i in range(1, len(verts_so_far)):
+                does_intersect, intersection = seg_intersect(np.array(verts_so_far[i - 1]),
+                                                             np.array(verts_so_far[i]),
+                                                             np.array(verts_so_far[-1]), np.array(cursor))
+                if does_intersect and not np.all(intersection == verts_so_far[-1]):
+                    predicted_polygon = _create_shape_mask(verts_so_far, dataset.image_size)
+                    iou = calculate_iou(ground_truth, predicted_polygon)
+                    ious.append(iou)
+                    should_break = True
+                    break
+            if should_break:
+                break
             verts_so_far.append(cursor)
 
-            distance = np.linalg.norm(np.array(poly_verts[0]) - np.array(cursor))
-            if distance < 2:
-                predicted_polygon = _create_shape_mask(verts_so_far, dataset.image_size)
-                iou = calculate_iou(ground_truth, predicted_polygon)
-                ious.append(iou)
-                num_iou += 1
-                break
-            elif i >= 7:
-                failed_shapes += 1
-                # num_iou += 1
-                # ious.append(0)
-                break
-
-        if logdir and polygon_number < 5:
-            fig, ax = plt.subplots(nrows=4, ncols=len(predictions))
-            fig.suptitle(str(iou))
-            for timestep in range(len(states)):
-                for i in range(states[0].shape[-1]):
-                    ax[i][timestep].axis('off')
-                    ax[i][timestep].imshow(states[timestep][:, :, i], cmap='gray', interpolation='nearest')
-
-                i += 1
-                t = _create_point_mask(poly_verts[timestep], dataset.image_size) if timestep < len(
-                    poly_verts) else np.zeros_like(predictions[timestep])
-                ax[i][timestep].axis('off')
-                ax[i][timestep].imshow(np.vstack([t[timestep], predictions[timestep], np.zeros_like(t[timestep])]),
-                                       cmap='gray', interpolation='nearest')
-
-            fig.savefig(logdir + '/' + str(global_step) + '/' + str(polygon_number))
-            plt.close(fig)
+        if show_intermediate_images:
+            plt.imshow(state, interpolation='nearest')
+            plt.show(block=True)
+        if show_images:
+            state = np.concatenate(
+                [image, np.expand_dims(history_mask, axis=2), np.expand_dims(predicted_polygon, axis=2)],
+                axis=2)
+            plt.imshow(state, interpolation='nearest')
+            plt.suptitle('steps={}, IOU={}%'.format(timestep + 1, iou * 100))
+            plt.show(block=True)
 
     return ious, failed_shapes
 
@@ -177,68 +199,61 @@ def visualize_weights(sess, est):
             ax[i][e].imshow(W_conv1[:, :, i, e], cmap='gray', interpolation='nearest')
 
 
-# if __name__ == '__main__':
-#     data = np.load('dataset_polygons.npy')
-#     print('{} polygons loaded.'.format(data.shape[0]))
-#     valid_size = data.shape[0] // 10
-#     training_data = data[valid_size:]
-#     validation_data = data[:valid_size]
-#     del data  # Make sure we don't contaminate the training set
-#     print('{} for training. {} for validation.'.format(len(training_data), len(validation_data)))
-#
-#     with tf.Session() as sess:
-#         est = cnn.CNN_Estimator()
-#         saver = tf.train.Saver()
-#         # if not os.path.exists(('results')):
-#         #     os.makedirs('results/')
-#         # train_writer = tf.train.SummaryWriter('./results/train', sess.graph)
-#         # valid_writer = tf.train.SummaryWriter('./results/valid')
-#         #
-#         sess.run(tf.global_variables_initializer())
-#
-#         saver.restore(sess, 'results/model.ckpt')
-#         #
-#         for i in range(50):
-#             # visualize_weights(sess, est)
-#             visual_eval(*validation_data[i])
-#
-#         ious, failed = evaluate_iou(validation_data, sess, est)
-#         print('IOU = {}, failed = {}'.format(sum(ious) / len(ious), failed))
-
-
 if __name__ == '__main__':
-    import matplotlib.pyplot as plt
-    from supervised_vertices.Dataset import get_train_and_valid_datasets
     import tensorflow as tf
-    from supervised_vertices.RNN_Estimator import RNN_Estimator
+    from supervised_vertices.Dataset import get_train_and_valid_datasets
+    from supervised_vertices.cnn import CNN_Estimator
+    import os
 
-    model = RNN_Estimator(max_timesteps=5, init_scale=0.1)
+    training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy')
+
+    logdir = 'cnn_points'
     with tf.Session() as sess:
-        logdir = 'rnn_2'
-        saver = tf.train.Saver(keep_checkpoint_every_n_hours=1, max_to_keep=2)
+        global_step = tf.Variable(0, name='global_step', trainable=False)
+        est = CNN_Estimator(image_size=32)
+        saver = tf.train.Saver()
+        if not os.path.exists((logdir + '/iou')):
+            os.makedirs(logdir + '/iou')
 
-        saver.restore(sess, save_path=logdir + '/model.ckpt')
+        sess.run(tf.global_variables_initializer())
+        saver.restore(sess, tf.train.latest_checkpoint(logdir))
 
-        training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy')
-        d, x, t = training_set.get_batch_for_rnn(max_timesteps=5)
-        o = sess.run(model.predictions, feed_dict={model.sequence_length: d, model.inputs: x, model.targets: t})
+        ious, failed = evaluate_iou(validation_set, sess, est, show_intermediate_images=False, show_images=True)
+        print('IOU={}\tFailed={}'.format(sum(ious) / len(validation_set), failed / len(validation_set)))
 
-        batch_size, max_timesteps, _, _, _ = x.shape
-        for b in range(batch_size):
-            fig, ax = plt.subplots(nrows=5, ncols=max_timesteps, figsize=(10, 2 * max(len(x), 2)))
-            [ax[0][t].set_title(d[b]) for t in range(max_timesteps)]
-
-            for timestep in range(x[b].shape[0]):
-                for i in range(x[b].shape[-1]):
-                    ax[i][timestep].axis('off')
-                    ax[i][timestep].imshow(x[b, timestep, :, :, i], cmap='gray', interpolation='nearest')
-
-                i += 1
-                ax[i][timestep].axis('off')
-                ax[i][timestep].imshow(t[b, timestep, :, :], cmap='gray', interpolation='nearest')
-
-                i += 1
-                ax[i][timestep].axis('off')
-                ax[i][timestep].imshow(o[b, timestep, :, :], cmap='gray', interpolation='nearest')
-
-            plt.show(block=True)
+# if __name__ == '__main__':
+#     import matplotlib.pyplot as plt
+#     from supervised_vertices.Dataset import get_train_and_valid_datasets
+#     import tensorflow as tf
+#     from supervised_vertices.RNN_Estimator import RNN_Estimator
+#
+#     model = RNN_Estimator(max_timesteps=5, init_scale=0.1)
+#     with tf.Session() as sess:
+#         logdir = 'rnn_2'
+#         saver = tf.train.Saver(keep_checkpoint_every_n_hours=1, max_to_keep=2)
+#
+#         saver.restore(sess, save_path=logdir + '/model.ckpt')
+#
+#         training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy')
+#         d, x, t = training_set.get_batch_for_rnn(max_timesteps=5)
+#         o = sess.run(model.predictions, feed_dict={model.sequence_length: d, model.inputs: x, model.targets: t})
+#
+#         batch_size, max_timesteps, _, _, _ = x.shape
+#         for b in range(batch_size):
+#             fig, ax = plt.subplots(nrows=5, ncols=max_timesteps, figsize=(10, 2 * max(len(x), 2)))
+#             [ax[0][t].set_title(d[b]) for t in range(max_timesteps)]
+#
+#             for timestep in range(x[b].shape[0]):
+#                 for i in range(x[b].shape[-1]):
+#                     ax[i][timestep].axis('off')
+#                     ax[i][timestep].imshow(x[b, timestep, :, :, i], cmap='gray', interpolation='nearest')
+#
+#                 i += 1
+#                 ax[i][timestep].axis('off')
+#                 ax[i][timestep].imshow(t[b, timestep, :, :], cmap='gray', interpolation='nearest')
+#
+#                 i += 1
+#                 ax[i][timestep].axis('off')
+#                 ax[i][timestep].imshow(o[b, timestep, :, :], cmap='gray', interpolation='nearest')
+#
+#             plt.show(block=True)
