@@ -171,6 +171,8 @@ For RL formulation, images are randomly generated at runtime. First step allows 
 
 **Supervised (CNN): 80-85% IOU**
 
+Model: conv(16 5x5 filters) -> 2x conv(32 3x3 filters) -> fc
+
 2% of shapes fail to close within 10 time steps. Other shapes close, but have no area.
 
 In the following pictures, red is ground truth, green is estimate, and blue is cursor. Of course, everything overlaps so things come out in multiple colours...
@@ -200,6 +202,8 @@ No existing runs.
 
 **A3C (CNN): 60% IOU**
 
+Model: conv(16 5x5 filters) -> conv(32 3x3 filters) -> conv(32 3x3 filters) -> FC
+
 Never gets past forming simple squares that basically take up the whole image. I would say this is identical to the baseline.
 
 ![](readme_images/individualImage_5.png)
@@ -209,6 +213,10 @@ Never gets past forming simple squares that basically take up the whole image. I
 ![](readme_images/individualImage_7.png)
 
 **A3C (LSTM): 80% IOU**
+
+Policy Model: 4x conv(32 3x3 filters with stride 2) -> LSTM(256 cells) -> FC
+
+Value Model: Shared with policy except last layer
 
 Does this work better because it actually learns something about the shapes, or is it just because it has more parameters so it can memorize more shapes?
 
@@ -220,7 +228,7 @@ Does this work better because it actually learns something about the shapes, or 
 
 **Using 128x128 images:**
 
-A3C(LSTM + squared reward)
+**A3C(LSTM)**
 
 ---
 
