@@ -230,6 +230,10 @@ Does this work better because it actually learns something about the shapes, or 
 
 **A3C(LSTM)**
 
+# 23 March 2017
+- ~~Figure out if scipy is drawing just the interior of the shape and if we need to compensate by adding the outline to `create_shape_mask()`~~
+- ~~Saving~~
+
 ---
 
 ### Papers
@@ -241,7 +245,6 @@ Does this work better because it actually learns something about the shapes, or 
 - [Generalized Advantage Estimation](https://arxiv.org/pdf/1506.02438.pdf)
 
 ### TODO
-- Figure out if scipy is drawing just the interior of the shape and if we need to compensate by adding the outline to `create_shape_mask()`
 - Summaries
     - Actions taken
     - better/debugged logits heatmap/overlay?
@@ -253,4 +256,10 @@ Does this work better because it actually learns something about the shapes, or 
 - RL
     - Measure how close the first (or nth) point is to the perimeter of the shape by perpendicular distance
     - Pretrain the policy network
-- Try providing the first (final) point as input
+
+
+- Provide first point
+- Remove trace
+- Try LSTM with end token
+- Try LSTM supervised learning
+- Pretrained policy

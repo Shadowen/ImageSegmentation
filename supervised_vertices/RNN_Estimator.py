@@ -7,111 +7,88 @@ image_size = 32  # TODO get rid of this and make it cleaner
 
 
 class RNN_Estimator(object):
-    def __init__(self, max_timesteps, init_scale=0.1):
+    def __init__(self):
         """ Create an RNN.
 
         Args:
-            max_timesteps: An integer. The maximum number of timesteps expected from the RNN.
             init_scale: A float. All weight matrices will be initialized using
                 a uniform distribution over [-init_scale, init_scale].
         """
 
-        self.max_timesteps = max_timesteps
         self.input_shape = [32, 32, 3]
         self.target_shape = [32, 32]
-        self.init_scale = init_scale
 
         ## Feed Vars
-        # A Tensor of shape [None]
-        self._seq_length = tf.placeholder(tf.int32, shape=[None], name='seq_length')
-        # A Tensor of shape [None, max_timesteps, ...]
-        self._inputs = tf.placeholder(tf.float32, shape=[None, max_timesteps] + self.input_shape,
+        # A Tensor of shape [None, ...]
+        self._inputs = tf.placeholder(tf.float32, shape=[None] + self.input_shape,
                                       name='inputs')
-        # A Tensor of shape [None, max_timesteps, ...]
-        self._targets = tf.placeholder(tf.float32, shape=[None, max_timesteps] + self.target_shape,
+        # A Tensor of shape [None, ...]
+        self._targets = tf.placeholder(tf.float32, shape=[None] + self.target_shape,
                                        name='targets')
         # A scalar
         self.iou = tf.placeholder(dtype=tf.float32, shape=[], name='iou')
         self.failures = tf.placeholder(dtype=tf.float32, shape=[], name='failure_rate')
 
         ## Fetch Vars
+        init_scale = 0.1
         initializer = tf.random_uniform_initializer(-init_scale, init_scale)
         with tf.variable_scope('model', initializer=initializer):
+            self._inputs_unrolled = tf.reshape(self._inputs,
+                                               shape=[-1, reduce(operator.mul, self._inputs.shape.as_list()[1:])])
             self._create_inference_graph()
+            self._targets_unrolled = tf.reshape(self._targets,
+                                                shape=[-1, reduce(operator.mul, self._targets.shape.as_list()[1:])])
             self._create_loss_graph()
-            self._create_optimizer(initial_learning_rate=1e-1, num_steps_per_decay=20000,
+            self._create_optimizer(initial_learning_rate=1e-1, num_steps_per_decay=100000,
                                    decay_rate=0.05, max_global_norm=1.0)
         with tf.variable_scope('train'):
-            self._training_summaries, self._training_image_summaries, self._training_iou_summaries = self._build_summaries()
+            self._training_summaries, self._training_image_summaries = self._build_summaries()
         with tf.variable_scope('valid'):
-            self._validation_summaries, self._validation_image_summaries, self._validation_iou_summaries = self._build_summaries()
+            self._validation_summaries, self._validation_image_summaries = self._build_summaries()
 
     def _create_inference_graph(self):
         """ Create a CNN that feeds an RNN. """
 
-        self._batch_size = tf.shape(self.inputs, out_type=tf.int64)[0]
+        x = self._inputs
+        for i in range(4):
+            x = tf.layers.conv2d(inputs=x, filters=32, name="l{}".format(i + 1), kernel_size=(3, 3), padding='same',
+                                 activation=tf.nn.relu)
+        # Make x ready to go into an LSTM
+        x = tf.reshape(x, shape=[-1, reduce(operator.mul, x.get_shape().as_list()[1:])])
+        x = tf.expand_dims(x, axis=0)
 
-        self._inputs_unrolled = tf.reshape(self._inputs, shape=[-1] + self.input_shape)
-        self._targets_unrolled = tf.reshape(self._targets, shape=[-1] + [reduce(operator.mul, self.target_shape)])
+        lstm_cells = 256
+        lstm = tf.contrib.rnn.BasicLSTMCell(lstm_cells, state_is_tuple=True)
+        self._c_init = tf.zeros([1, lstm.state_size.c], dtype=tf.float32)
+        self._h_init = tf.zeros([1, lstm.state_size.h], dtype=tf.float32)
+        self._c_in = tf.placeholder_with_default(self._c_init, shape=[1, lstm.state_size.c], name='c_in')
+        self._h_in = tf.placeholder_with_default(self._h_init, shape=[1, lstm.state_size.h], name='h_in')
+        self.seq_length = tf.shape(self._inputs, out_type=tf.int32)[0]
+        lstm_outputs, self._lstm_final_state = tf.nn.dynamic_rnn(lstm, x,
+                                                                 initial_state=tf.contrib.rnn.LSTMStateTuple(self._c_in,
+                                                                                                             self._h_in),
+                                                                 sequence_length=tf.expand_dims(self.seq_length,
+                                                                                                axis=0))
+        lstm_outputs = tf.squeeze(lstm_outputs, squeeze_dims=[0])
+        self._logits_unrolled = tf.layers.dense(inputs=lstm_outputs,
+                                                units=reduce(operator.mul, self.target_shape), activation=None,
+                                                name='action')
+        self._logits = tf.reshape(self._logits_unrolled, shape=[self.seq_length] + self.target_shape)
 
-        with tf.variable_scope('input_cnn'):
-            self._drop_rate = tf.placeholder_with_default(0.0, shape=[])
-
-            with tf.variable_scope('conv1'):
-                self._h_conv1 = tf.layers.conv2d(inputs=self._inputs_unrolled, filters=64, kernel_size=[5, 5],
-                                                 padding='same', activation=tf.nn.relu)
-                self._h_pool1 = tf.layers.max_pooling2d(inputs=self._h_conv1, pool_size=[2, 2], strides=2)
-
-            with tf.variable_scope('conv2'):
-                self._h_conv2 = tf.layers.conv2d(inputs=self._h_pool1, filters=128, kernel_size=[5, 5],
-                                                 padding='same', activation=tf.nn.relu)
-                self._h_pool2 = tf.layers.max_pooling2d(inputs=self._h_conv2, pool_size=[2, 2], strides=2)
-
-            with tf.variable_scope('fc1'):
-                fc_size = reduce(operator.mul, self._h_pool2.get_shape().as_list()[1:], 1)
-                self._h_pool2_flat = tf.reshape(self._h_pool2, [-1, fc_size])
-                self._h_fc1 = tf.layers.dense(inputs=self._h_pool2_flat, units=fc_size, activation=tf.nn.relu)
-                self._h_fc1_drop = tf.layers.dropout(inputs=self._h_fc1, rate=self._drop_rate)
-
-            with tf.variable_scope('fc2'):
-                self._y_unrolled = tf.layers.dense(inputs=self._h_fc1_drop, units=image_size * image_size,
-                                                   activation=tf.nn.relu)
-                self._y = tf.reshape(self._y_unrolled, shape=[-1, self.max_timesteps] + [image_size * image_size])
-
-        with tf.variable_scope('recurrent_network'):
-            num_rnn_cells = 1024
-
-            cell = tf.contrib.rnn.BasicLSTMCell(num_units=num_rnn_cells)
-            cell = tf.contrib.rnn.MultiRNNCell([cell] * 3)
-
-            rnn_outputs, self._last_states = tf.nn.dynamic_rnn(cell, self._y, sequence_length=self._seq_length,
-                                                               dtype=tf.float32)
-            rnn_outputs_unrolled = tf.reshape(rnn_outputs, shape=[-1, num_rnn_cells])
-            last_states_unrolled = tf.reshape(self._last_states, shape=[-1, num_rnn_cells])
-
-        with tf.variable_scope('output_layer'):
-            fc1 = tf.layers.dense(rnn_outputs_unrolled, units=4096,
-                                  activation=tf.nn.relu)
-            self._output_unrolled = tf.layers.dense(fc1,
-                                                    units=reduce(operator.mul, self.target_shape),
-                                                    activation=tf.nn.relu)
-
-            self._output = tf.reshape(self._output_unrolled,
-                                      shape=[-1, self.max_timesteps] + self.target_shape)
-
-        self.softmax = tf.reshape(tf.nn.softmax(self.predictions), shape=[-1, image_size, image_size])
+        self._softmax_unrolled = tf.nn.softmax(self._logits_unrolled)
+        self.softmax = tf.reshape(self._softmax_unrolled, shape=[self.seq_length] + self.target_shape)
 
     def _create_loss_graph(self):
         """ Compute cross entropy loss between targets and predictions. Also compute the L2 error. """
 
         # Cross entropy loss
         with tf.variable_scope('loss'):
-            self.losses = tf.nn.softmax_cross_entropy_with_logits(logits=self._output_unrolled,
-                                                                  labels=self._targets_unrolled)
-            self._loss = tf.reduce_mean(self.losses)
+            self._losses = tf.nn.softmax_cross_entropy_with_logits(logits=self._logits_unrolled,
+                                                                   labels=self._targets_unrolled)
+            self._loss = tf.reduce_mean(self._losses)
 
-        self._predictions_coords = [tf.mod(tf.argmax(self._output_unrolled, dimension=1), image_size),
-                                    tf.floordiv(tf.argmax(self._output_unrolled, dimension=1), image_size)]
+        self._predictions_coords = [tf.mod(tf.argmax(self._logits_unrolled, dimension=1), image_size),
+                                    tf.floordiv(tf.argmax(self._logits_unrolled, dimension=1), image_size)]
         self._predictions_coords = tf.stack(self._predictions_coords, axis=1)
         self._target_coords = [tf.mod(tf.argmax(self._targets_unrolled, dimension=1), image_size),
                                tf.floordiv(tf.argmax(self._targets_unrolled, dimension=1), image_size)]
@@ -120,8 +97,8 @@ class RNN_Estimator(object):
         # Number of pixels correct
         with tf.variable_scope('accuracy'):
             x_correct, y_correct = tf.split(tf.equal(self._predictions_coords, self._target_coords), 2, axis=1)
-            self._accuracy = tf.count_nonzero(tf.logical_and(x_correct, y_correct)) / (
-                self._batch_size * self.max_timesteps)
+            self._accuracy = tf.count_nonzero(tf.logical_and(x_correct, y_correct)) / tf.cast(self.seq_length,
+                                                                                              dtype=tf.int64)
 
         # L2 error
         with tf.variable_scope('error'):
@@ -163,23 +140,21 @@ class RNN_Estimator(object):
     def _build_summaries(self):
         """Creates summary operations from existing Tensors"""
         learning_rate_summary = tf.summary.scalar('learning_rate', self._learning_rate)
-        loss_summary = tf.summary.scalar('loss', self._loss)
+        loss_summary = tf.summary.scalar('loss', self.loss)
         grad_norm_summary = tf.summary.scalar('grad_norm', sum(tf.norm(g) for g in self._grads))
         accuracy_summary = tf.summary.scalar('accuracy', self._accuracy)
-        error_summary = tf.summary.scalar('error', self._error)
+        error_summary = tf.summary.scalar('error', self.error)
         scalar_summaries = tf.summary.merge(
             [learning_rate_summary, loss_summary, accuracy_summary, error_summary, grad_norm_summary])
 
-        input_visualization_summary = tf.summary.image("Inputs", self._inputs_unrolled)
-        output_visualization_summary = tf.summary.image("Outputs", tf.expand_dims(self.softmax, dim=3))
+        input_visualization_summary = tf.summary.image('Inputs', self.inputs)
+        output_visualization_summary = tf.summary.image('Outputs', tf.expand_dims(
+            tf.reshape(self.softmax, shape=[-1, 32, 32]), dim=3))
+        target_visualization_summary = tf.summary.image('Targets', tf.expand_dims(self.targets, dim=3))
         image_summaries = tf.summary.merge(
-            [input_visualization_summary, output_visualization_summary])
+            [input_visualization_summary, output_visualization_summary, target_visualization_summary])
 
-        failure_summary = tf.summary.scalar('failure_rate', self.failures)
-        iou_summary = tf.summary.scalar('iou', self.iou)
-        iou_summaries = tf.summary.merge([failure_summary, iou_summary])
-
-        return scalar_summaries, image_summaries, iou_summaries
+        return scalar_summaries, image_summaries
 
     @property
     def inputs(self):
@@ -187,24 +162,24 @@ class RNN_Estimator(object):
         return self._inputs
 
     @property
+    def lstm_init_state(self):
+        """ The initial state of the LSTM. """
+        return self._c_init, self._h_init
+
+    @property
     def targets(self):
         """ An n-D float32 placeholder with shape `[dynamic_duration, target_size]`. """
         return self._targets
 
     @property
-    def sequence_length(self):
-        """ A 1-D int32 placeholder with shape `[batch_size]`. """
-        return self._seq_length
-
-    @property
-    def states(self):
-        """ A 2-D float32 Tensor with shape `[batch_size * max_duration, hidden_layer_size]`. """
-        return self._states
-
-    @property
     def predictions(self):
         """ An n-D float32 Tensor with shape `[batch_size, max_duration, target_size]`. """
-        return self._output
+        return self._logits_unrolled
+
+    @property
+    def lstm_final_state(self):
+        """ The final state of the LSTM after prediction. """
+        return self._lstm_final_state
 
     @property
     def loss(self):
@@ -239,52 +214,49 @@ class RNN_Estimator(object):
 
 
 # TODO encapsulate this somewhere, hopefully entirely inside TensorFlow if possible
-def evaluate_iou(sess, est, dataset):
-    from supervised_vertices import generate, analyze
-    import itertools
+def evaluate_iou(sess, est, dataset, batch_size=None):
     import numpy as np
-    from supervised_vertices.Dataset import _create_image, _create_history_mask, _create_point_mask, _create_shape_mask
+    from supervised_vertices.Dataset import _create_history_mask, _create_point_mask, _create_shape_mask
+    from supervised_vertices.helper import seg_intersect
+
+    batch_size = batch_size if batch_size is not None else len(dataset)
 
     # IOU
     failed_shapes = 0
-    num_iou = 0
     ious = []
-    batch_size = 50
-    for b in range(batch_size):
-        vertices, ground_truth = dataset.data[b]
 
-        image = _create_image(ground_truth)
-        # Probably should optimize this with a numpy array and clever math. Use np.roll
-        start_idx = np.random.randint(len(vertices))
-        poly_verts = vertices[start_idx:] + vertices[:start_idx]
-        cursor = poly_verts[0]
-        verts_so_far = [cursor]
+    for image, poly_verts, ground_truth in dataset.raw_sample(batch_size=batch_size):
+        cursor = poly_verts[np.random.randint(len(poly_verts))]
+        prediction_vertices = []
+        lstm_c, lstm_h = sess.run(est.lstm_init_state)
 
-        predictions = []
-        inputs = np.zeros([1, 5, 32, 32, 3])
-        for t in itertools.count():
-            history_mask = _create_history_mask(verts_so_far, len(verts_so_far), image_size)
+        # Try to predict the polygon!
+        for t in range(10):
+            history_mask = _create_history_mask(prediction_vertices, len(prediction_vertices), 32)
             cursor_mask = _create_point_mask(cursor, image_size)
             state = np.stack([image, history_mask, cursor_mask], axis=2)
+            # Feed this one state, but use the previous LSTM state.
+            # Basically generate the RNN output one step at a time.
+            pred_coords, (lstm_c, lstm_h) = sess.run([est._predictions_coords, est.lstm_final_state],
+                                                     {est.inputs: np.expand_dims(state, axis=0), est._c_in: lstm_c,
+                                                      est._h_in: lstm_h})
+            cursor = tuple(pred_coords[0].tolist())
 
-            inputs[0, t, ::] = state
-            pred, pred_coords = sess.run([est._output_unrolled, est._predictions_coords],
-                                         {est.sequence_length: np.ones([1]) * (t + 1), est.inputs: inputs})
-            predictions.append(pred[t])
+            # Self intersecting shape
+            for i in range(1, len(prediction_vertices)):
+                does_intersect, intersection = seg_intersect(np.array(prediction_vertices[i - 1]),
+                                                             np.array(prediction_vertices[i]),
+                                                             np.array(prediction_vertices[-1]), np.array(cursor))
+                if does_intersect and not np.all(intersection == prediction_vertices[-1]):
+                    # Calculate IOU
+                    predicted_polygon = _create_shape_mask(prediction_vertices, 32)
+                    intersection = np.count_nonzero(predicted_polygon * ground_truth)
+                    union = np.count_nonzero(predicted_polygon) + np.count_nonzero(ground_truth) - intersection
+                    ious.append(intersection / union) if union != 0 else None
+                    break
+            prediction_vertices.append(cursor)
+        else:
+            # If we run for too many time steps
+            failed_shapes += 1
 
-            cursor = tuple(reversed(pred_coords[t].tolist()))
-            verts_so_far.append(cursor)
-
-            distance = np.linalg.norm(np.array(poly_verts[0]) - np.array(cursor))
-            if distance < 2:
-                predicted_polygon = _create_shape_mask(verts_so_far, image_size)
-                iou = analyze.calculate_iou(ground_truth, predicted_polygon)
-                ious.append(iou)
-                num_iou += 1
-                break
-            elif t + 1 >= 5:
-                failed_shapes += 1
-                # num_iou += 1
-                # ious.append(0)
-                break
-    return failed_shapes / batch_size, sum(ious) / num_iou if num_iou > 0 else -1
+    return failed_shapes / batch_size, sum(ious) / len(ious)

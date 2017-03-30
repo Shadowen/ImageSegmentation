@@ -51,15 +51,14 @@ def get_train_and_valid_datasets(filename, local=True):
         del data  # Make sure we don't contaminate the training set
         print('{} for training. {} for validation.'.format(len(training_data), len(validation_data)))
 
-        # TODO(wheung) image size may vary, but not important for now
-        return Dataset(training_data, image_size=32), Dataset(validation_data, image_size=32)
+        return Dataset(training_data), Dataset(validation_data)
 
 
 class Dataset():
-    def __init__(self, data, image_size, images=None):
-        self.data = data
+    def __init__(self, data, images=None):
+        self._data = data
         self.images = images
-        self.image_size = image_size
+        self.image_size = data[0][1].shape[0]
 
     def get_batch_for_cnn(self, batch_size=50):
         """
@@ -70,18 +69,18 @@ class Dataset():
             batch_x is a NumPy array of shape [batch_size, 32, 32, 5]
             batch_t is a NumPy array of shape [batch_size, 32, 32]
         """
-        batch_indices = np.random.choice(self.data.shape[0], batch_size, replace=False)
+        batch_indices = np.random.choice(self._data.shape[0], batch_size, replace=False)
 
         batch_x = np.zeros([batch_size, self.image_size, self.image_size, 3])
         batch_t = np.zeros([batch_size, self.image_size, self.image_size])
         if self.images is not None:
             batch_images = self.images[batch_indices]
-            for idx, ((vertices, truth), image) in enumerate(zip(self.data[batch_indices], batch_images)):
+            for idx, ((vertices, truth), image) in enumerate(zip(self._data[batch_indices], batch_images)):
                 x, t = self._create_sample(self.image_size, vertices, truth, image)
                 batch_x[idx] = x
                 batch_t[idx] = t
         else:
-            for idx, (vertices, truth) in enumerate(self.data[batch_indices]):
+            for idx, (vertices, truth) in enumerate(self._data[batch_indices]):
                 x, t = self._create_sample(self.image_size, vertices, truth)
                 batch_x[idx] = x
                 batch_t[idx] = t
@@ -109,66 +108,95 @@ class Dataset():
         """
         :param batch_size:
         :param max_timesteps:
-        :return: tuple(batch_d, batch_x, batch_t)
+        :return: tuple(batch_d, batch_x, batch_t, poly_verts)
         where
             batch_d is a NumPy array of shape [batch_size]
             batch_x is a NumPy array of shape [batch_size, max_timesteps, 32, 32, 3]
             batch_t is a NumPy array of shape [batch_size, max_timesteps, 32, 32]
+            poly_verts is a Python List of length `batch_size` containing the vertices used to generate the polygon
         """
-        batch_indices = np.random.choice(self.data.shape[0], batch_size, replace=False)
+        batch_indices = np.random.choice(self._data.shape[0], batch_size, replace=False)
 
         batch_d = np.zeros([batch_size], dtype=np.int32)
         batch_x = np.zeros([batch_size, max_timesteps, self.image_size, self.image_size, 3])
         batch_t = np.zeros([batch_size, max_timesteps, self.image_size, self.image_size])
-        for idx, (vertices, truth) in enumerate(self.data[batch_indices]):
-            d, x, t = self._create_sample_sequence(self.image_size, vertices, truth)
+        poly_verts = []
+        for idx, (vertices, truth) in enumerate(self._data[batch_indices]):
+            d, x, t = self._create_sample_sequence(vertices, truth)
             batch_d[idx] = d
             batch_x[idx, :d, ::] = x
             batch_t[idx, :d, ::] = t
-        return batch_d, batch_x, batch_t
+            poly_verts.append(vertices)
+        return batch_d, batch_x, batch_t, poly_verts
 
-    def _create_sample_sequence(self, image_size, poly_verts, ground_truth, image=None):
+    def get_sample_for_rnn(self, max_timesteps=5):
+        """
+        :param batch_size:
+        :param max_timesteps:
+        :return: tuple(d, x, t, poly_verts)
+        where
+            d is a NumPy array of shape []
+            x is a NumPy array of shape [max_timesteps, 32, 32, 3]
+            t is a NumPy array of shape [max_timesteps, 32, 32]
+            poly_verts is a Python List of length `batch_size` containing the vertices used to generate the polygon
+        """
+        idx = np.random.choice(self._data.shape[0], 1, replace=False)[0]
+
+        vertices, truth = self._data[idx]
+        d, x, t = self._create_sample_sequence(vertices, truth)
+        return d, x, t, vertices
+
+    def _create_sample_sequence(self, poly_verts, ground_truth, image=None):
+        """
+        :param image_size:
+        :param poly_verts:
+        :param ground_truth:
+        :param image: Optional.
+        :return:
+        """
         total_num_verts = len(poly_verts)
 
         image = image if image is not None else np.expand_dims(_create_image(ground_truth), axis=2)
         start_idx = np.random.randint(total_num_verts + 1)
         poly_verts = np.roll(poly_verts, start_idx, axis=0)
 
-        inputs = np.empty([total_num_verts, image_size, image_size, 3])
-        outputs = np.empty([total_num_verts, image_size, image_size], dtype=np.uint16)
+        inputs = np.empty([total_num_verts, self.image_size, self.image_size, 3])
+        outputs = np.empty([total_num_verts, self.image_size, self.image_size], dtype=np.uint16)
         for idx in range(total_num_verts):
-            history_mask = _create_history_mask(poly_verts, idx + 1, image_size)
-            cursor_mask = _create_point_mask(poly_verts[idx], image_size)
+            history_mask = np.expand_dims(_create_history_mask(poly_verts, idx + 1, self.image_size), axis=2)
+            cursor_mask = np.expand_dims(_create_point_mask(poly_verts[idx], self.image_size), axis=2)
 
-            state = np.stack([image, history_mask, cursor_mask], axis=2)
+            state = np.concatenate([image, history_mask, cursor_mask], axis=2)
             next_point = np.array(poly_verts[(idx + 1) % total_num_verts])
 
             inputs[idx, :, :] = state
-            outputs[idx, :, :] = _create_point_mask(next_point, image_size)
+            outputs[idx, :, :] = _create_point_mask(next_point, self.image_size)
 
         return total_num_verts, inputs, outputs
 
-    def create_input_for_test(self):
-        batch_indices = np.random.choice(self.data.shape[0], batch_size, replace=False)
-        image_size = 32
-
-        for idx, (vertices, ground_truth) in enumerate(self.data[batch_indices]):
-            total_num_verts = len(poly_verts)
-
-            image = _create_image(ground_truth)
-            start_idx = np.random.randint(total_num_verts + 1)
-            # Probably should optimize this with a numpy array and clever math. Use np.roll
-            poly_verts = poly_verts[start_idx:] + poly_verts[:start_idx]
-
-            history_mask = _create_history_mask(poly_verts, 1, image_size)
-            cursor_mask = _create_point_mask(poly_verts[0], image_size)
-
-            state = np.stack([image, history_mask, cursor_mask], axis=2)
-
-            yield state
+    def raw_sample(self, batch_size):
+        """Sample a minibatch from the dataset.
+        :return: zip(batch_images, batch_verts, batch_t)
+        where
+            batch_verts is a Python list of polygon vertices (as NumPy arrays).
+            batch_t is the ground truth image as a NumPy array.
+        """
+        batch_indices = np.random.choice(self._data.shape[0], batch_size, replace=False)
+        batch_verts, batch_t = zip(*self._data[batch_indices])
+        batch_images = self.images[batch_indices] if self.images else batch_t
+        return zip(batch_images, batch_verts, batch_t)
 
     def __len__(self):
-        return self.data.shape[0]
+        return self._data.shape[0]
+
+    def show_samples(self, rows=5, cols=5):
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots(rows, cols)
+        plt.suptitle('Shape samples')
+        for i in range(rows):
+            for e in range(cols):
+                ax[i][e].imshow(self._data[i * cols + e][1], cmap='gray', interpolation='nearest')
+        plt.show(block=True)
 
 
 def _create_image(ground_truth):
@@ -190,18 +218,12 @@ def _create_image(ground_truth):
     return image
 
 
-def _create_history_mask(vertices, num_points, image_size, use_lines=False):
-    if use_lines:
-        player_mask = np.zeros([image_size, image_size])
-        for i in range(1, num_points):
-            rr, cc = skimage.draw.line(vertices[i - 1][0], vertices[i - 1][1], vertices[i][0], vertices[i][1])
-            player_mask[rr, cc] = 1
-        return player_mask
-    else:  # TODO remove this?
-        player_mask = np.zeros([image_size, image_size])
-        for i in range(1, num_points):
-            player_mask[tuple(vertices[i])] = 1
-        return player_mask
+def _create_history_mask(vertices, num_points, image_size):
+    player_mask = np.zeros([image_size, image_size])
+    for i in range(1, num_points):
+        rr, cc = skimage.draw.line(vertices[i - 1][0], vertices[i - 1][1], vertices[i][0], vertices[i][1])
+        player_mask[rr, cc] = 1
+    return player_mask
 
 
 def _create_point_mask(point, image_size):
