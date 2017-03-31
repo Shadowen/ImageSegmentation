@@ -76,7 +76,7 @@ class RNN_Estimator(object):
         self._logits = tf.reshape(self._logits_unrolled, shape=[self.seq_length] + self.target_shape)
 
         self._softmax_unrolled = tf.nn.softmax(self._logits_unrolled)
-        self.softmax = tf.reshape(self._softmax_unrolled, shape=[self.seq_length] + self.target_shape)
+        self._softmax = tf.reshape(self._softmax_unrolled, shape=[self.seq_length] + self.target_shape)
 
     def _create_loss_graph(self):
         """ Compute cross entropy loss between targets and predictions. Also compute the L2 error. """
@@ -172,6 +172,10 @@ class RNN_Estimator(object):
         return self._targets
 
     @property
+    def softmax(self):
+        return self._softmax
+
+    @property
     def predictions(self):
         """ An n-D float32 Tensor with shape `[batch_size, max_duration, target_size]`. """
         return self._logits_unrolled
@@ -213,8 +217,7 @@ class RNN_Estimator(object):
         return self._validation_image_summaries
 
 
-# TODO encapsulate this somewhere, hopefully entirely inside TensorFlow if possible
-def evaluate_iou(sess, est, dataset, batch_size=None):
+def evaluate_iou(sess, est, dataset, batch_size=None, logdir=None):
     import numpy as np
     from supervised_vertices.Dataset import _create_history_mask, _create_point_mask, _create_shape_mask
     from supervised_vertices.helper import seg_intersect
@@ -224,23 +227,31 @@ def evaluate_iou(sess, est, dataset, batch_size=None):
     # IOU
     failed_shapes = 0
     ious = []
+    failed_images = []
 
-    for image, poly_verts, ground_truth in dataset.raw_sample(batch_size=batch_size):
+    for image_number, (image, poly_verts, ground_truth) in enumerate(dataset.raw_sample(batch_size=batch_size)):
         cursor = poly_verts[np.random.randint(len(poly_verts))]
         prediction_vertices = []
         lstm_c, lstm_h = sess.run(est.lstm_init_state)
 
+        previous_states = []
+        previous_softmaxes = []
+
         # Try to predict the polygon!
+        polygon_complete = False
         for t in range(10):
             history_mask = _create_history_mask(prediction_vertices, len(prediction_vertices), 32)
             cursor_mask = _create_point_mask(cursor, image_size)
             state = np.stack([image, history_mask, cursor_mask], axis=2)
+            previous_states.append(state)
             # Feed this one state, but use the previous LSTM state.
             # Basically generate the RNN output one step at a time.
-            pred_coords, (lstm_c, lstm_h) = sess.run([est._predictions_coords, est.lstm_final_state],
-                                                     {est.inputs: np.expand_dims(state, axis=0), est._c_in: lstm_c,
-                                                      est._h_in: lstm_h})
-            cursor = tuple(pred_coords[0].tolist())
+            softmax, pred_coords, (lstm_c, lstm_h) = sess.run(
+                [est.softmax, est._predictions_coords, est.lstm_final_state],
+                {est.inputs: np.expand_dims(state, axis=0), est._c_in: lstm_c,
+                 est._h_in: lstm_h})
+            previous_softmaxes.append(softmax[0])
+            cursor = tuple(reversed(pred_coords[0].tolist()))
 
             # Self intersecting shape
             for i in range(1, len(prediction_vertices)):
@@ -253,10 +264,35 @@ def evaluate_iou(sess, est, dataset, batch_size=None):
                     intersection = np.count_nonzero(predicted_polygon * ground_truth)
                     union = np.count_nonzero(predicted_polygon) + np.count_nonzero(ground_truth) - intersection
                     ious.append(intersection / union) if union != 0 else None
+                    polygon_complete = True
                     break
             prediction_vertices.append(cursor)
-        else:
+
+            if polygon_complete:
+                break
+        history_mask = _create_history_mask(prediction_vertices, len(prediction_vertices), 32)
+        cursor_mask = _create_point_mask(cursor, image_size)
+        state = np.stack([image, history_mask, cursor_mask], axis=2)
+        previous_states.append(state)
+
+        if not polygon_complete:
             # If we run for too many time steps
             failed_shapes += 1
+            failed_images.append(state)
 
-    return failed_shapes / batch_size, sum(ious) / len(ious)
+        # Save some pictures!
+        if logdir is not None:
+            import matplotlib
+            matplotlib.use('Agg')
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(nrows=2, ncols=len(previous_states), sharex=True, sharey=True)
+            plt.axis('off')
+            plt.suptitle('image_number=' + image_number + ('IOU={}'.format(ious[-1]) if polygon_complete else 'FAILED'))
+            for i in range(len(previous_states)):
+                ax[0][i].imshow(previous_states[i], cmap='gray', interpolation='nearest')
+            for i in range(len(previous_softmaxes)):
+                ax[1][i].imshow(previous_softmaxes[i], cmap='gray', interpolation='nearest')
+            plt.savefig('{}/{}.png'.format(logdir, image_number))
+            plt.close()
+
+    return failed_shapes / batch_size, (sum(ious) / len(ious)) if len(ious) > 0 else 0, failed_images

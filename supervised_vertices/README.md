@@ -234,6 +234,14 @@ Does this work better because it actually learns something about the shapes, or 
 - ~~Figure out if scipy is drawing just the interior of the shape and if we need to compensate by adding the outline to `create_shape_mask()`~~
 - ~~Saving~~
 
+# 30 March 2017
+- ~Try LSTM supervised learning~
+- What kind of architecture do we use? 2 FC layers at the end is impossibly huge
+    - 224**4 parameters!
+    - Try architecture inspired by [FCN](https://people.eecs.berkeley.edu/~jonlong/long_shelhamer_fcn.pdf)
+    - Should just downsample...
+
+
 ---
 
 ### Papers
@@ -245,14 +253,11 @@ Does this work better because it actually learns something about the shapes, or 
 - [Generalized Advantage Estimation](https://arxiv.org/pdf/1506.02438.pdf)
 
 ### TODO
+- Compare supervised/RL/combined
 - Summaries
     - Actions taken
     - better/debugged logits heatmap/overlay?
-    - How many shapes fail to close
     - failure cases - maybe do this after training?
-- What kind of architecture do we use? 2 FC layers at the end is impossibly huge
-    - 224**4 parameters!
-    - Try architecture inspired by [FCN](https://people.eecs.berkeley.edu/~jonlong/long_shelhamer_fcn.pdf)
 - RL
     - Measure how close the first (or nth) point is to the perimeter of the shape by perpendicular distance
     - Pretrain the policy network
@@ -261,5 +266,4 @@ Does this work better because it actually learns something about the shapes, or 
 - Provide first point
 - Remove trace
 - Try LSTM with end token
-- Try LSTM supervised learning
 - Pretrained policy

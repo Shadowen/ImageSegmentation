@@ -14,7 +14,6 @@ def train(sess, model, training_set, validation_set, num_optimization_steps, log
     Args:
         sess: A Session.
         model: A Model.
-            `inputs` and `targets` both having shape `[dynamic_duration, 1]`.
         num_optimization_steps: An integer.
         logdir: A string. The log directory.
     """
@@ -43,7 +42,7 @@ def train(sess, model, training_set, validation_set, num_optimization_steps, log
 
         # IOU
         if step % 1000 == 0:
-            avg_failed_shapes, avg_iou = evaluate_iou(sess, model, validation_set, batch_size=100)
+            avg_failed_shapes, avg_iou, failed_images = evaluate_iou(sess, model, validation_set, batch_size=100)
             iou_summaries = tf.Summary()
             iou_summaries.value.add(tag='valid/failed_shapes', simple_value=avg_failed_shapes)
             iou_summaries.value.add(tag='valid/iou', simple_value=avg_iou)
@@ -56,8 +55,8 @@ def train(sess, model, training_set, validation_set, num_optimization_steps, log
 
 if __name__ == '__main__':
     logdir = 'rnn'
-    do_train = False
-    restart_training = False
+    do_train = True
+    restart_training = True
 
     training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy')
     model = RNN_Estimator()
@@ -65,9 +64,19 @@ if __name__ == '__main__':
         saver = tf.train.Saver(keep_checkpoint_every_n_hours=1, max_to_keep=2)
 
         if restart_training and os.path.exists(logdir):
+            print('Resetting training directory at `{}`.'.format(logdir))
             shutil.rmtree(logdir)
             os.makedirs(logdir)
         if do_train:
+            print('Training started!')
             train(sess, model, training_set, validation_set, num_optimization_steps=100000, logdir=logdir)
+            print('Training complete!')
         elif tf.train.latest_checkpoint(logdir):
+            print('Restoring model from `' + logdir + '/model.ckpt`...', end=' ')
             saver.restore(sess, save_path=logdir + '/model.ckpt')
+            print('Success!')
+
+            print('Evaluating IOU...', end=' ')
+            avg_failed_shapes, avg_iou, failed_images = evaluate_iou(sess, model, validation_set, batch_size=100,
+                                                                     logdir=logdir)
+            print('Average failed shapes={}\]t Average IOU={}'.format(avg_failed_shapes, avg_iou))
