@@ -59,23 +59,32 @@ if __name__ == '__main__':
     logdir = 'convlstm'  # Where to save the checkpoints and output files
     do_train = True  # Should we run the training steps?
     restart_training = True  # Turn this on to delete any existing directory
-    is_local = True  # Turn this on for training on the CS cluster
+    is_local = False  # Turn this on for training on the CS cluster
 
     # Parameters
-    input_channels = 3  # The total number of input channels. The image may have 1 or 3, while each additional mask adds one.
-    image_size = 32
-    prediction_size = 32
+    image_size = 28
+    prediction_size = 28
     max_timesteps = 20
 
     if is_local:
-        training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy', image_size=image_size,
+        input_channels = 3
+        print('Loading data from numpy archive...')
+        training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy',
+                                                                    image_size=image_size,
                                                                     input_channels=input_channels,
-                                                                    prediction_size=prediction_size, is_local=True)
+                                                                    prediction_size=prediction_size,
+                                                                    is_local=True)
+        print('Done!')
     else:
-        training_set, validation_set = get_train_and_valid_datasets('/home/wesley/data', image_size=image_size,
+        logdir = '/ais/gobi5/polyRL/' + logdir
+        input_channels = 5
+        print('Loading data from JSON...')
+        training_set, validation_set = get_train_and_valid_datasets('/ais/gobi4/wiki/polyrnn/data/shapes_texture/',
+                                                                    image_size=image_size,
                                                                     input_channels=input_channels,
                                                                     prediction_size=prediction_size,
                                                                     is_local=False)
+        print('Done!')
     model = RNN_Estimator(image_size=image_size, input_channels=input_channels, prediction_size=prediction_size)
     with tf.Session() as sess:
         saver = tf.train.Saver(keep_checkpoint_every_n_hours=1, max_to_keep=2)

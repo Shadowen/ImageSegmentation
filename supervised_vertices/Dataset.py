@@ -37,7 +37,7 @@ def get_train_and_valid_datasets(filename, image_size, input_channels, predictio
                 # Convert to correct format
                 image = imresize(image, [image_size, image_size])
                 # TODO(wheung) figure out why rounding is necessary for segmentation->poly_vert conversion
-                poly_verts = np.rint(np.array(np.roll(np.array(segmentation[0]), 1, axis=1) * prediction_size))
+                poly_verts = np.floor(np.array(np.roll(np.array(segmentation[0]), 1, axis=1) * prediction_size))
                 poly_verts = skimage.measure.approximate_polygon(poly_verts, tolerance=1).astype(
                     np.int8)  # "Perfect" approximation?
                 ground_truth = _create_shape_mask(poly_verts, prediction_size)
