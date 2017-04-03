@@ -3,16 +3,22 @@ import skimage.measure
 import numpy as np
 
 
-def get_train_and_valid_datasets(filename, local=True):
+def get_train_and_valid_datasets(filename, image_size, input_channels, prediction_size, is_local=True):
     """
     :param filename:
-    :return:
+    :param image_size:
+    :param prediction_size:
+    :param is_local: Optional. True for cluster-style loading.
+    :return: tuple(train_data, valid_data)
+    where
+        train_data is a Dataset consisting of the training set
+        valid_data is a Dataset consisting of the validation set
     """
-    if not local:
+    if not is_local:
         import json
         import os
-        import matplotlib.image as mpimage
         from supervised_vertices.generate import _create_shape_mask
+        from scipy.misc import imread, imresize
         # Load from the CS cluster
         original_directory = os.getcwd()
         os.chdir(filename)
@@ -27,21 +33,27 @@ def get_train_and_valid_datasets(filename, local=True):
                 with open('{}/{}/info/{}'.format(filename, usage, number), 'r') as f:
                     contents = json.load(f)
                 segmentation, patch_path = contents['segmentation'], contents['patch_path']
-                image = mpimage.imread(patch_path)
+                image = imread(patch_path)
                 # Convert to correct format
-                image_size = image.shape[0]
+                image = imresize(image, [image_size, image_size])
                 # TODO(wheung) figure out why rounding is necessary for segmentation->poly_vert conversion
-                poly_verts = np.array(np.roll(np.array(segmentation[0]), 1, axis=1) * image_size).astype(np.int32)
-                ground_truth = _create_shape_mask(poly_verts, image_size)
+                poly_verts = np.rint(np.array(np.roll(np.array(segmentation[0]), 1, axis=1) * prediction_size))
+                poly_verts = skimage.measure.approximate_polygon(poly_verts, tolerance=1).astype(
+                    np.int8)  # "Perfect" approximation?
+                ground_truth = _create_shape_mask(poly_verts, prediction_size)
                 # Store it
                 data.append((poly_verts, ground_truth))
                 images.append(image)
-            datasets.append(Dataset(np.array(data), image_size=image_size, images=np.array(images)))
+            datasets.append(Dataset(np.array(data),
+                                    image_size=image_size,
+                                    input_channels=input_channels,
+                                    prediction_size=prediction_size,
+                                    images=np.array(images)))
 
         print('{} polygons loaded from {}'.format((sum(map(len, datasets))), filename))
         print('{} for training. {} for validation.'.format(len(datasets[0]), len(datasets[1])))
         os.chdir(original_directory)
-        return datasets
+        return tuple(datasets)
     else:
         data = np.load(filename)
         print('{} polygons loaded from {}.'.format(data.shape[0], filename))
@@ -51,14 +63,32 @@ def get_train_and_valid_datasets(filename, local=True):
         del data  # Make sure we don't contaminate the training set
         print('{} for training. {} for validation.'.format(len(training_data), len(validation_data)))
 
-        return Dataset(training_data), Dataset(validation_data)
+        return Dataset(training_data,
+                       image_size=image_size,
+                       input_channels=input_channels,
+                       prediction_size=prediction_size), \
+               Dataset(validation_data,
+                       image_size=image_size,
+                       input_channels=input_channels,
+                       prediction_size=prediction_size)
 
 
 class Dataset():
-    def __init__(self, data, images=None):
+    def __init__(self, data, image_size, input_channels, prediction_size, images=None):
         self._data = data
-        self.images = images
-        self.image_size = data[0][1].shape[0]
+        self._images = images
+        self._input_channels = input_channels
+        self._image_size = image_size
+        self._prediction_size = prediction_size
+
+    def _get_image(self, idx):
+        """
+        :param idx: The index of the item in the data array
+        :return: An NumPy array of shape [self._image_size, self._image_size].
+            This is the requested image for the given index. If no images have been loaded, generates an image.
+        """
+        return self._images[idx] if self._images is not None else np.expand_dims(_create_image(self._data[idx, 1]),
+                                                                                 axis=2)
 
     def get_batch_for_cnn(self, batch_size=50):
         """
@@ -71,17 +101,17 @@ class Dataset():
         """
         batch_indices = np.random.choice(self._data.shape[0], batch_size, replace=False)
 
-        batch_x = np.zeros([batch_size, self.image_size, self.image_size, 3])
-        batch_t = np.zeros([batch_size, self.image_size, self.image_size])
-        if self.images is not None:
-            batch_images = self.images[batch_indices]
+        batch_x = np.zeros([batch_size, self._image_size, self._image_size, 3])
+        batch_t = np.zeros([batch_size, self._image_size, self._image_size])
+        if self._images is not None:
+            batch_images = self._images[batch_indices]
             for idx, ((vertices, truth), image) in enumerate(zip(self._data[batch_indices], batch_images)):
-                x, t = self._create_sample(self.image_size, vertices, truth, image)
+                x, t = self._create_sample(self._image_size, vertices, truth, image)
                 batch_x[idx] = x
                 batch_t[idx] = t
         else:
             for idx, (vertices, truth) in enumerate(self._data[batch_indices]):
-                x, t = self._create_sample(self.image_size, vertices, truth)
+                x, t = self._create_sample(self._image_size, vertices, truth)
                 batch_x[idx] = x
                 batch_t[idx] = t
 
@@ -90,7 +120,8 @@ class Dataset():
     def _create_sample(self, image_size, poly_verts, ground_truth, image=None):
         total_num_verts = len(poly_verts)
 
-        image = image if image is not None else np.expand_dims(_create_image(ground_truth), axis=2)
+        image = image if image is not None else np.expand_dims(_create_image(ground_truth),
+                                                               axis=2)  # TODO use self._get_image
         start_idx = np.random.randint(total_num_verts + 1)
         num_verts = np.random.randint(total_num_verts)
         poly_verts = np.roll(poly_verts, start_idx, axis=0)
@@ -118,35 +149,34 @@ class Dataset():
         batch_indices = np.random.choice(self._data.shape[0], batch_size, replace=False)
 
         batch_d = np.zeros([batch_size], dtype=np.int32)
-        batch_x = np.zeros([batch_size, max_timesteps, self.image_size, self.image_size, 3])
-        batch_t = np.zeros([batch_size, max_timesteps, self.image_size, self.image_size])
+        batch_x = np.zeros([batch_size, max_timesteps, self._image_size, self._image_size, 3])
+        batch_t = np.zeros([batch_size, max_timesteps, self._image_size, self._image_size])
         poly_verts = []
         for idx, (vertices, truth) in enumerate(self._data[batch_indices]):
-            d, x, t = self._create_sample_sequence(vertices, truth)
+            d, x, t = self._create_sample_sequence(vertices, image=self._get_image(idx))
             batch_d[idx] = d
             batch_x[idx, :d, ::] = x
             batch_t[idx, :d, ::] = t
             poly_verts.append(vertices)
         return batch_d, batch_x, batch_t, poly_verts
 
-    def get_sample_for_rnn(self, max_timesteps=5):
+    def get_sample_for_rnn(self):
         """
         :param batch_size:
-        :param max_timesteps:
         :return: tuple(d, x, t, poly_verts)
         where
             d is a NumPy array of shape []
-            x is a NumPy array of shape [max_timesteps, 32, 32, 3]
-            t is a NumPy array of shape [max_timesteps, 32, 32]
+            x is a NumPy array of shape [max_timesteps, image_size, image_size, 3]
+            t is a NumPy array of shape [max_timesteps, prediction_size, prediction_size]
             poly_verts is a Python List of length `batch_size` containing the vertices used to generate the polygon
         """
         idx = np.random.choice(self._data.shape[0], 1, replace=False)[0]
 
         vertices, truth = self._data[idx]
-        d, x, t = self._create_sample_sequence(vertices, truth)
+        d, x, t = self._create_sample_sequence(vertices, image=self._get_image(idx))
         return d, x, t, vertices
 
-    def _create_sample_sequence(self, poly_verts, ground_truth, image=None):
+    def _create_sample_sequence(self, poly_verts, image=None):
         """
         :param image_size:
         :param poly_verts:
@@ -156,23 +186,22 @@ class Dataset():
         """
         total_num_verts = len(poly_verts)
 
-        image = image if image is not None else np.expand_dims(_create_image(ground_truth), axis=2)
         start_idx = np.random.randint(total_num_verts + 1)
         poly_verts = np.roll(poly_verts, start_idx, axis=0)
 
-        inputs = np.empty([total_num_verts, self.image_size, self.image_size, 3])
-        outputs = np.empty([total_num_verts, self.image_size, self.image_size], dtype=np.uint16)
+        inputs = np.empty([total_num_verts, self._image_size, self._image_size, self._input_channels])
+        targets = np.empty([total_num_verts, self._image_size, self._image_size], dtype=np.uint16)
         for idx in range(total_num_verts):
-            history_mask = np.expand_dims(_create_history_mask(poly_verts, idx + 1, self.image_size), axis=2)
-            cursor_mask = np.expand_dims(_create_point_mask(poly_verts[idx], self.image_size), axis=2)
+            history_mask = np.expand_dims(_create_history_mask(poly_verts, idx + 1, self._image_size), axis=2)
+            cursor_mask = np.expand_dims(_create_point_mask(poly_verts[idx], self._image_size), axis=2)
 
             state = np.concatenate([image, history_mask, cursor_mask], axis=2)
             next_point = np.array(poly_verts[(idx + 1) % total_num_verts])
 
             inputs[idx, :, :] = state
-            outputs[idx, :, :] = _create_point_mask(next_point, self.image_size)
+            targets[idx, :, :] = _create_point_mask(next_point, self._prediction_size)
 
-        return total_num_verts, inputs, outputs
+        return total_num_verts, inputs, targets
 
     def raw_sample(self, batch_size):
         """Sample a minibatch from the dataset.
@@ -183,11 +212,15 @@ class Dataset():
         """
         batch_indices = np.random.choice(self._data.shape[0], batch_size, replace=False)
         batch_verts, batch_t = zip(*self._data[batch_indices])
-        batch_images = self.images[batch_indices] if self.images else batch_t
+        batch_images = self._images[batch_indices] if self._images is not None else batch_t  # TODO generate images
         return zip(batch_images, batch_verts, batch_t)
 
     def __len__(self):
         return self._data.shape[0]
+
+    @property
+    def image_size(self):
+        return self._image_size
 
     def show_samples(self, rows=5, cols=5):
         import matplotlib.pyplot as plt

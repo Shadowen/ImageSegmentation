@@ -3,11 +3,9 @@ import tensorflow as tf
 import operator
 from functools import reduce
 
-image_size = 32  # TODO get rid of this and make it cleaner
-
 
 class RNN_Estimator(object):
-    def __init__(self):
+    def __init__(self, image_size, input_channels, prediction_size):
         """ Create an RNN.
 
         Args:
@@ -15,8 +13,9 @@ class RNN_Estimator(object):
                 a uniform distribution over [-init_scale, init_scale].
         """
 
-        self.input_shape = [32, 32, 3]
-        self.target_shape = [32, 32]
+        self._image_size = image_size
+        self.input_shape = [self._image_size, self._image_size, input_channels]
+        self.target_shape = [prediction_size, prediction_size]
 
         ## Feed Vars
         # A Tensor of shape [None, ...]
@@ -51,8 +50,8 @@ class RNN_Estimator(object):
 
         x = self._inputs
         for i in range(4):
-            x = tf.layers.conv2d(inputs=x, filters=32, name="l{}".format(i + 1), kernel_size=(3, 3), padding='same',
-                                 activation=tf.nn.relu)
+            x = tf.layers.conv2d(inputs=x, filters=32, name="l{}".format(i + 1), kernel_size=(3, 3), strides=(2, 2),
+                                 padding='same', activation=tf.nn.relu)
         # Make x ready to go into an LSTM
         x = tf.reshape(x, shape=[-1, reduce(operator.mul, x.get_shape().as_list()[1:])])
         x = tf.expand_dims(x, axis=0)
@@ -87,11 +86,11 @@ class RNN_Estimator(object):
                                                                    labels=self._targets_unrolled)
             self._loss = tf.reduce_mean(self._losses)
 
-        self._predictions_coords = [tf.mod(tf.argmax(self._logits_unrolled, dimension=1), image_size),
-                                    tf.floordiv(tf.argmax(self._logits_unrolled, dimension=1), image_size)]
+        self._predictions_coords = [tf.mod(tf.argmax(self._logits_unrolled, dimension=1), self._image_size),
+                                    tf.floordiv(tf.argmax(self._logits_unrolled, dimension=1), self._image_size)]
         self._predictions_coords = tf.stack(self._predictions_coords, axis=1)
-        self._target_coords = [tf.mod(tf.argmax(self._targets_unrolled, dimension=1), image_size),
-                               tf.floordiv(tf.argmax(self._targets_unrolled, dimension=1), image_size)]
+        self._target_coords = [tf.mod(tf.argmax(self._targets_unrolled, dimension=1), self._image_size),
+                               tf.floordiv(tf.argmax(self._targets_unrolled, dimension=1), self._image_size)]
         self._target_coords = tf.stack(self._target_coords, axis=1)
 
         # Number of pixels correct
@@ -147,10 +146,17 @@ class RNN_Estimator(object):
         scalar_summaries = tf.summary.merge(
             [learning_rate_summary, loss_summary, accuracy_summary, error_summary, grad_norm_summary])
 
-        input_visualization_summary = tf.summary.image('Inputs', self.inputs)
+        slices = tf.split(self.inputs, self.input_shape[-1], axis=3)
+        flat_images = tf.image.rgb_to_grayscale(tf.concat(slices[:3], axis=3))
+        flat_images = tf.expand_dims(
+            tf.expand_dims(tf.expand_dims(1 / tf.reduce_max(flat_images, axis=[1, 2, 3]), axis=1), axis=2),
+            axis=3) * flat_images
+        inputs_with_flat_images = tf.concat([flat_images, slices[-2], slices[-1]], axis=3,
+                                            name='inputs_with_flat_images')
+        input_visualization_summary = tf.summary.image('Inputs', inputs_with_flat_images, max_outputs=20)
         output_visualization_summary = tf.summary.image('Outputs', tf.expand_dims(
-            tf.reshape(self.softmax, shape=[-1, 32, 32]), dim=3))
-        target_visualization_summary = tf.summary.image('Targets', tf.expand_dims(self.targets, dim=3))
+            tf.reshape(self.softmax, shape=[-1] + self.target_shape), dim=3))
+        target_visualization_summary = tf.summary.image('Targets', tf.expand_dims(self.targets, dim=3), max_outputs=20)
         image_summaries = tf.summary.merge(
             [input_visualization_summary, output_visualization_summary, target_visualization_summary])
 
@@ -217,7 +223,7 @@ class RNN_Estimator(object):
         return self._validation_image_summaries
 
 
-def evaluate_iou(sess, est, dataset, batch_size=None, logdir=None):
+def evaluate_iou(sess, est, dataset, max_timesteps=10, batch_size=None, logdir=None):
     import numpy as np
     from supervised_vertices.Dataset import _create_history_mask, _create_point_mask, _create_shape_mask
     from supervised_vertices.helper import seg_intersect
@@ -239,10 +245,10 @@ def evaluate_iou(sess, est, dataset, batch_size=None, logdir=None):
 
         # Try to predict the polygon!
         polygon_complete = False
-        for t in range(10):
-            history_mask = _create_history_mask(prediction_vertices, len(prediction_vertices), 32)
-            cursor_mask = _create_point_mask(cursor, image_size)
-            state = np.stack([image, history_mask, cursor_mask], axis=2)
+        for t in range(max_timesteps):
+            history_mask = _create_history_mask(prediction_vertices, len(prediction_vertices), dataset.image_size)
+            cursor_mask = _create_point_mask(cursor, dataset.image_size)
+            state = np.concatenate([image, np.stack([history_mask, cursor_mask], axis=2)], axis=2)
             previous_states.append(state)
             # Feed this one state, but use the previous LSTM state.
             # Basically generate the RNN output one step at a time.
@@ -260,7 +266,7 @@ def evaluate_iou(sess, est, dataset, batch_size=None, logdir=None):
                                                              np.array(prediction_vertices[-1]), np.array(cursor))
                 if does_intersect and not np.all(intersection == prediction_vertices[-1]):
                     # Calculate IOU
-                    predicted_polygon = _create_shape_mask(prediction_vertices, 32)
+                    predicted_polygon = _create_shape_mask(prediction_vertices, dataset.image_size)
                     intersection = np.count_nonzero(predicted_polygon * ground_truth)
                     union = np.count_nonzero(predicted_polygon) + np.count_nonzero(ground_truth) - intersection
                     ious.append(intersection / union) if union != 0 else None
@@ -270,9 +276,9 @@ def evaluate_iou(sess, est, dataset, batch_size=None, logdir=None):
 
             if polygon_complete:
                 break
-        history_mask = _create_history_mask(prediction_vertices, len(prediction_vertices), 32)
-        cursor_mask = _create_point_mask(cursor, image_size)
-        state = np.stack([image, history_mask, cursor_mask], axis=2)
+        history_mask = _create_history_mask(prediction_vertices, len(prediction_vertices), dataset.image_size)
+        cursor_mask = _create_point_mask(cursor, dataset.image_size)
+        state = np.concatenate([image, np.stack([history_mask, cursor_mask], axis=2)], axis=2)
         previous_states.append(state)
 
         if not polygon_complete:
@@ -285,13 +291,17 @@ def evaluate_iou(sess, est, dataset, batch_size=None, logdir=None):
             import matplotlib
             matplotlib.use('Agg')
             import matplotlib.pyplot as plt
-            fig, ax = plt.subplots(nrows=2, ncols=len(previous_states), sharex=True, sharey=True)
+            fig, ax = plt.subplots(nrows=previous_states[0].shape[-1] + 1, ncols=len(previous_states), sharex=True,
+                                   sharey=True)
             plt.axis('off')
-            plt.suptitle('image_number=' + image_number + ('IOU={}'.format(ious[-1]) if polygon_complete else 'FAILED'))
+            plt.suptitle(
+                'image_number={}  '.format(image_number) + (
+                    'IOU={}'.format(ious[-1]) if polygon_complete else 'FAILED'))
             for i in range(len(previous_states)):
-                ax[0][i].imshow(previous_states[i], cmap='gray', interpolation='nearest')
+                for e in range(previous_states[i].shape[-1]):
+                    ax[e][i].imshow(previous_states[i][:, :, e], cmap='gray', interpolation='nearest')
             for i in range(len(previous_softmaxes)):
-                ax[1][i].imshow(previous_softmaxes[i], cmap='gray', interpolation='nearest')
+                ax[e + 1][i].imshow(previous_softmaxes[i], cmap='gray', interpolation='nearest')
             plt.savefig('{}/{}.png'.format(logdir, image_number))
             plt.close()
 
