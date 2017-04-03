@@ -42,7 +42,7 @@ def train(sess, model, training_set, validation_set, max_timesteps, num_optimiza
 
         # IOU
         if step % 1000 == 0:
-            avg_failed_shapes, avg_iou, failed_images = evaluate_iou(sess, model, validation_set, batch_size=None,
+            avg_failed_shapes, avg_iou, failed_images = evaluate_iou(sess, model, validation_set, batch_size=100,
                                                                      max_timesteps=max_timesteps)
             iou_summaries = tf.Summary()
             iou_summaries.value.add(tag='valid/failed_shapes', simple_value=avg_failed_shapes)
@@ -56,15 +56,15 @@ def train(sess, model, training_set, validation_set, max_timesteps, num_optimiza
 
 if __name__ == '__main__':
     # Settings
-    logdir = 'rnn'  # Where to save the checkpoints and output files
+    logdir = 'convlstm'  # Where to save the checkpoints and output files
     do_train = True  # Should we run the training steps?
-    restart_training = False  # Turn this on to delete any existing directory
-    is_local = False  # Turn this on for training on the CS cluster
+    restart_training = True  # Turn this on to delete any existing directory
+    is_local = True  # Turn this on for training on the CS cluster
 
     # Parameters
-    input_channels = 5  # The total number of input channels. The image may have 1 or 3, while each additional mask adds one.
-    image_size = 28
-    prediction_size = 28
+    input_channels = 3  # The total number of input channels. The image may have 1 or 3, while each additional mask adds one.
+    image_size = 32
+    prediction_size = 32
     max_timesteps = 20
 
     if is_local:

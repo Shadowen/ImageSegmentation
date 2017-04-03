@@ -212,7 +212,8 @@ class Dataset():
         """
         batch_indices = np.random.choice(self._data.shape[0], batch_size, replace=False)
         batch_verts, batch_t = zip(*self._data[batch_indices])
-        batch_images = self._images[batch_indices] if self._images is not None else batch_t  # TODO generate images
+        batch_images = self._images[batch_indices] if self._images is not None else np.expand_dims(batch_t,
+                                                                                                   axis=3)  # TODO generate images
         return zip(batch_images, batch_verts, batch_t)
 
     def __len__(self):

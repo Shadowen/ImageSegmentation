@@ -1,7 +1,11 @@
 from __future__ import division
+import sys
+
+sys.path.append('.')
 import tensorflow as tf
 import operator
 from functools import reduce
+from supervised_vertices.convLSTM import ConvLSTMCell, flatten, expand
 
 
 class RNN_Estimator(object):
@@ -50,32 +54,38 @@ class RNN_Estimator(object):
 
         x = self._inputs
         for i in range(4):
-            x = tf.layers.conv2d(inputs=x, filters=32, name="l{}".format(i + 1), kernel_size=(3, 3), strides=(2, 2),
-                                 padding='same', activation=tf.nn.relu)
+            x = tf.layers.conv2d(inputs=x, filters=32, name="l{}".format(i + 1), kernel_size=(3, 3), padding='same',
+                                 activation=tf.nn.relu)
         # Make x ready to go into an LSTM
-        x = tf.reshape(x, shape=[-1, reduce(operator.mul, x.get_shape().as_list()[1:])])
-        x = tf.expand_dims(x, axis=0)
+        x = flatten(tf.expand_dims(x, axis=0))
 
-        lstm_cells = 256
-        lstm = tf.contrib.rnn.BasicLSTMCell(lstm_cells, state_is_tuple=True)
+        num_lstm_filters = 1024
+        lstm = ConvLSTMCell(  # lstm_cells, state_is_tuple=True,
+            height=self._image_size, width=self._image_size, filters=num_lstm_filters,
+            kernel=[3, 3])
         self._c_init = tf.zeros([1, lstm.state_size.c], dtype=tf.float32)
         self._h_init = tf.zeros([1, lstm.state_size.h], dtype=tf.float32)
         self._c_in = tf.placeholder_with_default(self._c_init, shape=[1, lstm.state_size.c], name='c_in')
         self._h_in = tf.placeholder_with_default(self._h_init, shape=[1, lstm.state_size.h], name='h_in')
         self.seq_length = tf.shape(self._inputs, out_type=tf.int32)[0]
-        lstm_outputs, self._lstm_final_state = tf.nn.dynamic_rnn(lstm, x,
+        lstm_outputs, self._lstm_final_state = tf.nn.dynamic_rnn(lstm, x
+                                                                 ,
                                                                  initial_state=tf.contrib.rnn.LSTMStateTuple(self._c_in,
                                                                                                              self._h_in),
-                                                                 sequence_length=tf.expand_dims(self.seq_length,
-                                                                                                axis=0))
-        lstm_outputs = tf.squeeze(lstm_outputs, squeeze_dims=[0])
-        self._logits_unrolled = tf.layers.dense(inputs=lstm_outputs,
-                                                units=reduce(operator.mul, self.target_shape), activation=None,
-                                                name='action')
-        self._logits = tf.reshape(self._logits_unrolled, shape=[self.seq_length] + self.target_shape)
+                                                                 # sequence_length=tf.expand_dims(self.seq_length,
+                                                                 #                                axis=0)
+                                                                 )
+        lstm_outputs = tf.squeeze(expand(lstm_outputs, height=self._image_size, width=self._image_size,
+                                         filters=num_lstm_filters), axis=0)
+
+        # Output Layer
+        self._logits = tf.squeeze(tf.layers.conv2d(inputs=lstm_outputs, filters=1, kernel_size=(3, 3), padding='same'),
+                                  axis=3)
+        self._logits_unrolled = tf.reshape(self._logits, shape=[-1, self._image_size ** 2])
+        self._logits = tf.reshape(self._logits_unrolled, shape=[-1, self._image_size, self._image_size])
 
         self._softmax_unrolled = tf.nn.softmax(self._logits_unrolled)
-        self._softmax = tf.reshape(self._softmax_unrolled, shape=[self.seq_length] + self.target_shape)
+        self._softmax = tf.reshape(self._softmax_unrolled, shape=[-1] + self.target_shape)
 
     def _create_loss_graph(self):
         """ Compute cross entropy loss between targets and predictions. Also compute the L2 error. """
