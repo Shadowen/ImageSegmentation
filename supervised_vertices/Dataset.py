@@ -262,11 +262,12 @@ def _create_image(ground_truth):
 
 
 def _create_history_mask(vertices, num_points, image_size):
-    player_mask = np.zeros([image_size, image_size])
+    history_mask = np.zeros([image_size, image_size])
     for i in range(1, num_points):
         rr, cc = skimage.draw.line(vertices[i - 1][0], vertices[i - 1][1], vertices[i][0], vertices[i][1])
-        player_mask[rr, cc] = 1
-    return player_mask
+        history_mask[rr, cc] = 1
+    history_mask[vertices[0][0], vertices[0][1]] = 1
+    return history_mask
 
 
 def _create_point_mask(point, image_size):

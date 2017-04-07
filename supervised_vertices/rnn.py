@@ -21,13 +21,13 @@ def train(sess, model, training_set, validation_set, max_timesteps, num_optimiza
     summary_writer = tf.summary.FileWriter(logdir=logdir, graph=sess.graph)
 
     sess.run(tf.global_variables_initializer())
+    lstm_c, lstm_h = sess.run(model.lstm_init_state)
     for step in range(num_optimization_steps):
         print('\rStep %d.' % (step + 1), end='')
         durations, inputs, targets, _ = training_set.get_sample_for_rnn()
         training_summaries, training_image_summaries, _ = sess.run(
             [model.training_summaries, model.training_image_summaries, model.train_op],
-            {model.inputs: inputs,
-             model.targets: targets})
+            {model.inputs: inputs, model.targets: targets, model._c_in: lstm_c, model._h_in: lstm_h})
         summary_writer.add_summary(training_summaries, global_step=step)
         summary_writer.add_summary(training_image_summaries, global_step=step)
 
@@ -36,7 +36,7 @@ def train(sess, model, training_set, validation_set, max_timesteps, num_optimiza
             durations, inputs, targets, _ = validation_set.get_sample_for_rnn()
             validation_summaries, validation_image_summaries = sess.run(
                 [model.validation_summaries, model.validation_image_summaries],
-                {model.inputs: inputs, model.targets: targets})
+                {model.inputs: inputs, model.targets: targets, model._c_in: lstm_c, model._h_in: lstm_h})
             summary_writer.add_summary(validation_summaries, global_step=step)
             summary_writer.add_summary(validation_image_summaries, global_step=step)
 
@@ -57,19 +57,19 @@ def train(sess, model, training_set, validation_set, max_timesteps, num_optimiza
 
 if __name__ == '__main__':
     # Settings
-    logdir = '/data/convlstm_4_sided'  # Where to save the checkpoints and output files
-    do_train = True  # Should we run the training steps?
-    restart_training = True  # Turn this on to delete any existing directory
+    logdir = '/data/convlstm_learning_rate_1E-2'  # Where to save the checkpoints and output files
+    do_train = False  # Should we run the training steps?
+    restart_training = False # Turn this on to delete any existing directory
     is_local = True  # Turn this on for training on the CS cluster
 
     # Parameters
     image_size = 32
     prediction_size = 32
     max_timesteps = 10
-    num_steps = 30000
+    num_steps = 100000
 
     if is_local:
-        input_channels = 3
+        input_channels = 1
         print('Loading data from numpy archive...')
         training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy',
                                                                     image_size=image_size,
@@ -103,7 +103,8 @@ if __name__ == '__main__':
             os.makedirs(logdir)
         if do_train:
             print('Training started!')
-            train(sess, model, training_set, validation_set, max_timesteps=max_timesteps, num_optimization_steps=num_steps,
+            train(sess, model, training_set, validation_set, max_timesteps=max_timesteps,
+                  num_optimization_steps=num_steps,
                   logdir=logdir)
             print('Training complete!')
         elif tf.train.latest_checkpoint(logdir):
@@ -113,6 +114,6 @@ if __name__ == '__main__':
 
             print('Evaluating IOU...', end=' ')
             avg_failed_shapes, avg_iou, failed_images = evaluate_iou(sess, model, validation_set,
-                                                                     max_timesteps=max_timesteps, batch_size=None,
+                                                                     max_timesteps=max_timesteps, batch_size=20,
                                                                      logdir=logdir)
             print('Average failed shapes={}\]t Average IOU={}'.format(avg_failed_shapes, avg_iou))

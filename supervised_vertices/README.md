@@ -255,6 +255,13 @@ Does this work better because it actually learns something about the shapes, or 
 ![](readme_images/cluster_input.png)
 ![](readme_images/cluster_output.png)
 
+# 6 April 2017
+- convLSTM seems to predict points in any order
+    - First point is unknown - it can't see the cursor?
+    - Adding the first point to history map alleviates this problem
+    - No sense of directionality..?
+    - Good news is that it doesn't predict any single point more than once...
+
 ---
 
 ### Papers
@@ -280,3 +287,6 @@ Does this work better because it actually learns something about the shapes, or 
 - Remove trace
 - Try LSTM with end token
 - Pretrained policy
+- check ordering of vertices
+- increase receptive field
+- check without history

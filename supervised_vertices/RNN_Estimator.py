@@ -42,7 +42,7 @@ class RNN_Estimator(object):
             self._targets_unrolled = tf.reshape(self._targets,
                                                 shape=[-1, reduce(operator.mul, self._targets.shape.as_list()[1:])])
             self._create_loss_graph()
-            self._create_optimizer(initial_learning_rate=1e-1, num_steps_per_decay=100000,
+            self._create_optimizer(initial_learning_rate=1e-2, num_steps_per_decay=100000,
                                    decay_rate=0.05, max_global_norm=1.0)
         with tf.variable_scope('train'):
             self._training_summaries, self._training_image_summaries = self._build_summaries()
@@ -248,7 +248,7 @@ def evaluate_iou(sess, est, dataset, max_timesteps=10, batch_size=None, logdir=N
 
     for image_number, (image, poly_verts, ground_truth) in enumerate(dataset.raw_sample(batch_size=batch_size)):
         cursor = poly_verts[np.random.randint(len(poly_verts))]
-        prediction_vertices = []
+        prediction_vertices = [cursor]
         lstm_c, lstm_h = sess.run(est.lstm_init_state)
 
         previous_states = []

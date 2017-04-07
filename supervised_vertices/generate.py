@@ -40,7 +40,7 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
     many_samples = [
-        create_valid_polygon(image_size=32, shape_complexity=4, min_area=20, reduction_tolerance=1) for _
+        create_valid_polygon(image_size=32, shape_complexity=4, min_area=20, reduction_tolerance=5) for _
         in range(10000)]
 
     # Preview regular shapes
