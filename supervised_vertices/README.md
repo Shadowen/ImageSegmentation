@@ -230,6 +230,8 @@ Does this work better because it actually learns something about the shapes, or 
 
 **A3C(LSTM)**
 
+---
+
 # 23 March 2017
 - ~~Figure out if scipy is drawing just the interior of the shape and if we need to compensate by adding the outline to `create_shape_mask()`~~
 - ~~Saving~~
@@ -241,6 +243,17 @@ Does this work better because it actually learns something about the shapes, or 
     - Try architecture inspired by [FCN](https://people.eecs.berkeley.edu/~jonlong/long_shelhamer_fcn.pdf)
     - Should just downsample...
 
+# 2 April 2017
+- ConvLSTM integrated from https://github.com/carlthome/tensorflow-convlstm-cell/blob/master/cell.py
+    - Training is 7x faster!
+    - 93% IOU and 0 failed shapes on the mini synthetic set!!
+
+# 4 April 2017
+- Training on Lluis' dataset on the cluster
+    - Seems to try to predict all points at every time step to minimize loss
+    
+![](readme_images/cluster_input.png)
+![](readme_images/cluster_output.png)
 
 ---
 

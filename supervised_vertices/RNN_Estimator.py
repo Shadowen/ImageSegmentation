@@ -54,22 +54,20 @@ class RNN_Estimator(object):
 
         x = self._inputs
         for i in range(4):
-            x = tf.layers.conv2d(inputs=x, filters=32, name="l{}".format(i + 1), kernel_size=(3, 3), padding='same',
-                                 activation=tf.nn.relu)
+            x = tf.layers.conv2d(inputs=x, filters=32, name="l{}".format(i + 1), kernel_size=(3, 3),
+                                 padding='same', activation=tf.nn.relu)
         # Make x ready to go into an LSTM
         x = flatten(tf.expand_dims(x, axis=0))
 
-        num_lstm_filters = 1024
-        lstm = ConvLSTMCell(  # lstm_cells, state_is_tuple=True,
-            height=self._image_size, width=self._image_size, filters=num_lstm_filters,
-            kernel=[3, 3])
-        self._c_init = tf.zeros([1, lstm.state_size.c], dtype=tf.float32)
-        self._h_init = tf.zeros([1, lstm.state_size.h], dtype=tf.float32)
-        self._c_in = tf.placeholder_with_default(self._c_init, shape=[1, lstm.state_size.c], name='c_in')
-        self._h_in = tf.placeholder_with_default(self._h_init, shape=[1, lstm.state_size.h], name='h_in')
+        num_lstm_filters = 16
+        lstm_cell = ConvLSTMCell(height=self._image_size, width=self._image_size, filters=num_lstm_filters,
+                                 kernel=[3, 3])
+        self._c_init = tf.zeros([1, lstm_cell.state_size.c], dtype=tf.float32)
+        self._h_init = tf.zeros([1, lstm_cell.state_size.h], dtype=tf.float32)
+        self._c_in = tf.placeholder(tf.float32, shape=[1, lstm_cell.state_size.c], name='c_in')
+        self._h_in = tf.placeholder(tf.float32, shape=[1, lstm_cell.state_size.h], name='h_in')
         self.seq_length = tf.shape(self._inputs, out_type=tf.int32)[0]
-        lstm_outputs, self._lstm_final_state = tf.nn.dynamic_rnn(lstm, x
-                                                                 ,
+        lstm_outputs, self._lstm_final_state = tf.nn.dynamic_rnn(lstm_cell, x,
                                                                  initial_state=tf.contrib.rnn.LSTMStateTuple(self._c_in,
                                                                                                              self._h_in),
                                                                  # sequence_length=tf.expand_dims(self.seq_length,
@@ -90,11 +88,12 @@ class RNN_Estimator(object):
     def _create_loss_graph(self):
         """ Compute cross entropy loss between targets and predictions. Also compute the L2 error. """
 
-        # Cross entropy loss
+        # Loss
         with tf.variable_scope('loss'):
-            self._losses = tf.nn.softmax_cross_entropy_with_logits(logits=self._logits_unrolled,
-                                                                   labels=self._targets_unrolled)
-            self._loss = tf.reduce_mean(self._losses)
+            self._cross_entropy = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=self._logits_unrolled,
+                                                                                         labels=self._targets_unrolled),
+                                                 name='cross_entropy')
+            self._loss = self._cross_entropy
 
         self._predictions_coords = [tf.mod(tf.argmax(self._logits_unrolled, dimension=1), self._image_size),
                                     tf.floordiv(tf.argmax(self._logits_unrolled, dimension=1), self._image_size)]
@@ -114,6 +113,7 @@ class RNN_Estimator(object):
             self._individual_error = tf.sqrt(
                 tf.to_float(tf.reduce_sum((self._predictions_coords - self._target_coords) ** 2, 1)))
             self._error = tf.reduce_mean(self._individual_error)
+            self._max_error = tf.reduce_max(self._individual_error)
 
     def _create_optimizer(self, initial_learning_rate, num_steps_per_decay,
                           decay_rate, max_global_norm=1.0):
@@ -149,12 +149,14 @@ class RNN_Estimator(object):
     def _build_summaries(self):
         """Creates summary operations from existing Tensors"""
         learning_rate_summary = tf.summary.scalar('learning_rate', self._learning_rate)
-        loss_summary = tf.summary.scalar('loss', self.loss)
+        loss_summary = tf.summary.scalar('loss', self._loss)
         grad_norm_summary = tf.summary.scalar('grad_norm', sum(tf.norm(g) for g in self._grads))
         accuracy_summary = tf.summary.scalar('accuracy', self._accuracy)
         error_summary = tf.summary.scalar('error', self.error)
+        max_error_summary = tf.summary.scalar('max_error', self._max_error)
         scalar_summaries = tf.summary.merge(
-            [learning_rate_summary, loss_summary, accuracy_summary, error_summary, grad_norm_summary])
+            [learning_rate_summary, loss_summary, accuracy_summary, error_summary, max_error_summary,
+             grad_norm_summary])
 
         slices = tf.split(self.inputs, self.input_shape[-1], axis=3)
         flat_images = tf.image.rgb_to_grayscale(tf.concat(slices[:3], axis=3))
@@ -165,10 +167,9 @@ class RNN_Estimator(object):
                                             name='inputs_with_flat_images')
         input_visualization_summary = tf.summary.image('Inputs', inputs_with_flat_images, max_outputs=20)
         output_visualization_summary = tf.summary.image('Outputs', tf.expand_dims(
-            tf.reshape(self.softmax, shape=[-1] + self.target_shape), dim=3))
-        target_visualization_summary = tf.summary.image('Targets', tf.expand_dims(self.targets, dim=3), max_outputs=20)
-        image_summaries = tf.summary.merge(
-            [input_visualization_summary, output_visualization_summary, target_visualization_summary])
+            tf.reshape(self.softmax, shape=[-1] + self.target_shape), dim=3), max_outputs=20)
+        # target_visualization_summary = tf.summary.image('Targets', tf.expand_dims(self.targets, dim=3), max_outputs=20)
+        image_summaries = tf.summary.merge([input_visualization_summary, output_visualization_summary])
 
         return scalar_summaries, image_summaries
 

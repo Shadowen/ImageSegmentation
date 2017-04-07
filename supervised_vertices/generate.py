@@ -1,3 +1,6 @@
+import sys
+
+sys.path.append('.')
 import numpy as np
 import skimage.draw
 import scipy.ndimage
@@ -34,20 +37,17 @@ def _create_shape_mask(vertices, image_size):
 
 if __name__ == '__main__':
     from supervised_vertices import analyze
+    import matplotlib.pyplot as plt
 
     many_samples = [
-        create_valid_polygon(image_size=32, shape_complexity=10, min_area=86, reduction_tolerance=20) for _
+        create_valid_polygon(image_size=32, shape_complexity=4, min_area=20, reduction_tolerance=1) for _
         in range(10000)]
 
     # Preview regular shapes
     # for i in range(len(many_samples)):
-    #     for start in range(2, len(many_samples[i][0])):
-    #         plt.figure()
-    #         plt.imshow(create_history_mask(many_samples[i][0], start, 32), cmap='gray', interpolation='nearest')
-    #         valid_mask = create_valid_mask(many_samples[i][0], start, 32)
-    #         plt.figure()
-    #         plt.imshow(valid_mask, cmap='gray', interpolation='nearest')
-    #         plt.show(block=True)
+    #     plt.figure()
+    #     plt.imshow(many_samples[i][1])
+    #     plt.show(block=True)
 
     # # Preview RNN sequences
     # for i in range(len(many_samples)):

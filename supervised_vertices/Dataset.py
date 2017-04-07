@@ -1,6 +1,7 @@
 import skimage.draw
 import skimage.measure
 import numpy as np
+from scipy.misc import imread, imresize
 
 
 def get_train_and_valid_datasets(filename, image_size, input_channels, prediction_size, is_local=True):
@@ -18,7 +19,6 @@ def get_train_and_valid_datasets(filename, image_size, input_channels, predictio
         import json
         import os
         from supervised_vertices.generate import _create_shape_mask
-        from scipy.misc import imread, imresize
         # Load from the CS cluster
         original_directory = os.getcwd()
         os.chdir(filename)
@@ -56,6 +56,15 @@ def get_train_and_valid_datasets(filename, image_size, input_channels, predictio
         return tuple(datasets)
     else:
         data = np.load(filename)
+        # poly_verts, ground_truths = [np.array([np.array(d[idx]) for idx in range(d.shape[0])]) for d in
+        #                              [data[:, 0], data[:, 1]]]
+        # poly_verts = (poly_verts * (prediction_size / image_size)).tolist()
+        # ground_truths = ground_truths.tolist()
+        # for idx in range(len(ground_truths)):
+        #     ground_truths[idx] = np.array(imresize(ground_truths[idx], [image_size, image_size]), dtype=np.dtype('O'))
+        # ground_truths = np.array(ground_truths, dtype=np.dtype('O'))
+        # data = np.array([(np.floor(p).astype(np.int8), g) for p, g in zip(poly_verts, ground_truths)])
+        # del poly_verts, ground_truths
         print('{} polygons loaded from {}.'.format(data.shape[0], filename))
         valid_size = data.shape[0] // 10
         training_data = data[valid_size:]
@@ -190,7 +199,7 @@ class Dataset():
         poly_verts = np.roll(poly_verts, start_idx, axis=0)
 
         inputs = np.empty([total_num_verts, self._image_size, self._image_size, self._input_channels])
-        targets = np.empty([total_num_verts, self._image_size, self._image_size], dtype=np.uint16)
+        targets = np.empty([total_num_verts, self._prediction_size, self._prediction_size], dtype=np.uint16)
         for idx in range(total_num_verts):
             history_mask = np.expand_dims(_create_history_mask(poly_verts, idx + 1, self._image_size), axis=2)
             cursor_mask = np.expand_dims(_create_point_mask(poly_verts[idx], self._image_size), axis=2)

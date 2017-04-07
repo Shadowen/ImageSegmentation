@@ -42,7 +42,8 @@ def train(sess, model, training_set, validation_set, max_timesteps, num_optimiza
 
         # IOU
         if step % 1000 == 0:
-            avg_failed_shapes, avg_iou, failed_images = evaluate_iou(sess, model, validation_set, batch_size=100,
+            avg_failed_shapes, avg_iou, failed_images = evaluate_iou(sess, model, validation_set,
+                                                                     batch_size=min(100, len(validation_set)),
                                                                      max_timesteps=max_timesteps)
             iou_summaries = tf.Summary()
             iou_summaries.value.add(tag='valid/failed_shapes', simple_value=avg_failed_shapes)
@@ -56,15 +57,16 @@ def train(sess, model, training_set, validation_set, max_timesteps, num_optimiza
 
 if __name__ == '__main__':
     # Settings
-    logdir = 'convlstm'  # Where to save the checkpoints and output files
+    logdir = '/data/convlstm_4_sided'  # Where to save the checkpoints and output files
     do_train = True  # Should we run the training steps?
     restart_training = True  # Turn this on to delete any existing directory
-    is_local = False  # Turn this on for training on the CS cluster
+    is_local = True  # Turn this on for training on the CS cluster
 
     # Parameters
-    image_size = 28
-    prediction_size = 28
-    max_timesteps = 20
+    image_size = 32
+    prediction_size = 32
+    max_timesteps = 10
+    num_steps = 30000
 
     if is_local:
         input_channels = 3
@@ -84,6 +86,12 @@ if __name__ == '__main__':
                                                                     input_channels=input_channels,
                                                                     prediction_size=prediction_size,
                                                                     is_local=False)
+        # logdir = '/home/wesley/data/' + logdir
+        # training_set, validation_set = get_train_and_valid_datasets('/home/wesley/data/',
+        #                                                             image_size=image_size,
+        #                                                             input_channels=input_channels,
+        #                                                             prediction_size=prediction_size,
+        #                                                             is_local=False)
         print('Done!')
     model = RNN_Estimator(image_size=image_size, input_channels=input_channels, prediction_size=prediction_size)
     with tf.Session() as sess:
@@ -95,7 +103,7 @@ if __name__ == '__main__':
             os.makedirs(logdir)
         if do_train:
             print('Training started!')
-            train(sess, model, training_set, validation_set, max_timesteps=max_timesteps, num_optimization_steps=100000,
+            train(sess, model, training_set, validation_set, max_timesteps=max_timesteps, num_optimization_steps=num_steps,
                   logdir=logdir)
             print('Training complete!')
         elif tf.train.latest_checkpoint(logdir):
