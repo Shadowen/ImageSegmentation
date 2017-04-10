@@ -287,6 +287,9 @@ Does this work better because it actually learns something about the shapes, or 
 - Remove trace
 - Try LSTM with end token
 - Pretrained policy
+
+
 - check ordering of vertices
 - increase receptive field
-- check without history
+    - AlexNet frontend
+- check without history, with cursor

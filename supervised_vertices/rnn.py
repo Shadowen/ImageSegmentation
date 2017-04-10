@@ -57,9 +57,9 @@ def train(sess, model, training_set, validation_set, max_timesteps, num_optimiza
 
 if __name__ == '__main__':
     # Settings
-    logdir = '/data/convlstm_learning_rate_1E-2'  # Where to save the checkpoints and output files
-    do_train = False  # Should we run the training steps?
-    restart_training = False # Turn this on to delete any existing directory
+    logdir = '/home/wesley/data/convlstm_bigger_field/'  # Where to save the checkpoints and output files
+    do_train = True  # Should we run the training steps?
+    restart_training = True  # Turn this on to delete any existing directory
     is_local = True  # Turn this on for training on the CS cluster
 
     # Parameters
@@ -69,7 +69,7 @@ if __name__ == '__main__':
     num_steps = 100000
 
     if is_local:
-        input_channels = 1
+        input_channels = 3
         print('Loading data from numpy archive...')
         training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy',
                                                                     image_size=image_size,

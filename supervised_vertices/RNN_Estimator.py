@@ -53,13 +53,16 @@ class RNN_Estimator(object):
         """ Create a CNN that feeds an RNN. """
 
         x = self._inputs
-        for i in range(4):
-            x = tf.layers.conv2d(inputs=x, filters=32, name="l{}".format(i + 1), kernel_size=(3, 3),
-                                 padding='same', activation=tf.nn.relu)
+        filters = [16, 32, 32, 32]
+        kernel_sizes = [(5, 5), (5, 5), (3, 3), (3, 3)]
+        strides = [(2, 2), (2, 2), (1, 1), (1, 1)]
+        for i in range(len(kernel_sizes)):
+            x = tf.layers.conv2d(inputs=x, filters=filters[i], name="l{}".format(i + 1), kernel_size=kernel_sizes[i],
+                                 strides=strides[i], padding='same', activation=tf.nn.relu)
         # Make x ready to go into an LSTM
         x = flatten(tf.expand_dims(x, axis=0))
 
-        num_lstm_filters = 16
+        num_lstm_filters = 32
         lstm_cell = ConvLSTMCell(height=self._image_size, width=self._image_size, filters=num_lstm_filters,
                                  kernel=[3, 3])
         self._c_init = tf.zeros([1, lstm_cell.state_size.c], dtype=tf.float32)
@@ -159,12 +162,13 @@ class RNN_Estimator(object):
              grad_norm_summary])
 
         slices = tf.split(self.inputs, self.input_shape[-1], axis=3)
-        flat_images = tf.image.rgb_to_grayscale(tf.concat(slices[:3], axis=3))
-        flat_images = tf.expand_dims(
-            tf.expand_dims(tf.expand_dims(1 / tf.reduce_max(flat_images, axis=[1, 2, 3]), axis=1), axis=2),
-            axis=3) * flat_images
-        inputs_with_flat_images = tf.concat([flat_images, slices[-2], slices[-1]], axis=3,
-                                            name='inputs_with_flat_images')
+        # flat_images = tf.image.rgb_to_grayscale(tf.concat(slices[:3], axis=3))
+        # flat_images = tf.expand_dims(
+        #     tf.expand_dims(tf.expand_dims(1 / tf.reduce_max(flat_images, axis=[1, 2, 3]), axis=1), axis=2),
+        #     axis=3) * flat_images
+        # inputs_with_flat_images = tf.concat([flat_images, slices[-2], slices[-1]], axis=3,
+        #                                     name='inputs_with_flat_images')
+        inputs_with_flat_images = tf.concat(slices, axis=3, name='inputs_with_flat_images')
         input_visualization_summary = tf.summary.image('Inputs', inputs_with_flat_images, max_outputs=20)
         output_visualization_summary = tf.summary.image('Outputs', tf.expand_dims(
             tf.reshape(self.softmax, shape=[-1] + self.target_shape), dim=3), max_outputs=20)
