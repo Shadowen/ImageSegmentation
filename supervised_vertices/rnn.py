@@ -24,19 +24,21 @@ def train(sess, model, training_set, validation_set, max_timesteps, num_optimiza
     lstm_c, lstm_h = sess.run(model.lstm_init_state)
     for step in range(num_optimization_steps):
         print('\rStep %d.' % (step + 1), end='')
-        durations, inputs, targets, _ = training_set.get_sample_for_rnn()
+        durations, images, cursors, histories, targets, _ = training_set.get_sample_for_rnn()
         training_summaries, training_image_summaries, _ = sess.run(
             [model.training_summaries, model.training_image_summaries, model.train_op],
-            {model.inputs: inputs, model.targets: targets, model._c_in: lstm_c, model._h_in: lstm_h})
+            {model.image_input: images, model.cursor_mask: cursors, model.history_mask: histories,
+             model.targets: targets, model._c_in: lstm_c, model._h_in: lstm_h})
         summary_writer.add_summary(training_summaries, global_step=step)
         summary_writer.add_summary(training_image_summaries, global_step=step)
 
         # Validate
         if step % 100 == 0:
-            durations, inputs, targets, _ = validation_set.get_sample_for_rnn()
+            durations, images, cursors, histories, targets, _ = validation_set.get_sample_for_rnn()
             validation_summaries, validation_image_summaries = sess.run(
                 [model.validation_summaries, model.validation_image_summaries],
-                {model.inputs: inputs, model.targets: targets, model._c_in: lstm_c, model._h_in: lstm_h})
+                {model.image_input: images, model.cursor_mask: cursors, model.history_mask: histories,
+                 model.targets: targets, model._c_in: lstm_c, model._h_in: lstm_h})
             summary_writer.add_summary(validation_summaries, global_step=step)
             summary_writer.add_summary(validation_image_summaries, global_step=step)
 
@@ -57,34 +59,31 @@ def train(sess, model, training_set, validation_set, max_timesteps, num_optimiza
 
 if __name__ == '__main__':
     # Settings
-    logdir = '/home/wesley/data/convlstm_bigger_field/'  # Where to save the checkpoints and output files
+    logdir = 'alexnet_convlstm_3/'  # Where to save the checkpoints and output files
     do_train = True  # Should we run the training steps?
     restart_training = True  # Turn this on to delete any existing directory
     is_local = True  # Turn this on for training on the CS cluster
+    use_pretrained = True  # Use pretrained weights?
 
     # Parameters
-    image_size = 32
-    prediction_size = 32
+    image_size = 224
     max_timesteps = 10
     num_steps = 100000
 
+    model = RNN_Estimator(image_size=image_size, use_pretrained=use_pretrained)
     if is_local:
-        input_channels = 3
-        print('Loading data from numpy archive...')
-        training_set, validation_set = get_train_and_valid_datasets('dataset_polygons.npy',
+        print('Loading dataset from numpy archive...')
+        training_set, validation_set = get_train_and_valid_datasets('polygons_5-sided.npy',
                                                                     image_size=image_size,
-                                                                    input_channels=input_channels,
-                                                                    prediction_size=prediction_size,
+                                                                    prediction_size=model.prediction_size,
                                                                     is_local=True)
         print('Done!')
     else:
         logdir = '/ais/gobi5/polyRL/' + logdir
-        input_channels = 5
-        print('Loading data from JSON...')
+        print('Loading dataset from JSON...')
         training_set, validation_set = get_train_and_valid_datasets('/ais/gobi4/wiki/polyrnn/data/shapes_texture/',
                                                                     image_size=image_size,
-                                                                    input_channels=input_channels,
-                                                                    prediction_size=prediction_size,
+                                                                    prediction_size=model.prediction_size,
                                                                     is_local=False)
         # logdir = '/home/wesley/data/' + logdir
         # training_set, validation_set = get_train_and_valid_datasets('/home/wesley/data/',
@@ -93,7 +92,6 @@ if __name__ == '__main__':
         #                                                             prediction_size=prediction_size,
         #                                                             is_local=False)
         print('Done!')
-    model = RNN_Estimator(image_size=image_size, input_channels=input_channels, prediction_size=prediction_size)
     with tf.Session() as sess:
         saver = tf.train.Saver(keep_checkpoint_every_n_hours=1, max_to_keep=2)
 

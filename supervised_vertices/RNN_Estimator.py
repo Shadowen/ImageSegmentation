@@ -6,10 +6,11 @@ import tensorflow as tf
 import operator
 from functools import reduce
 from supervised_vertices.convLSTM import ConvLSTMCell, flatten, expand
+import numpy as np
 
 
 class RNN_Estimator(object):
-    def __init__(self, image_size, input_channels, prediction_size):
+    def __init__(self, image_size, use_pretrained=True):
         """ Create an RNN.
 
         Args:
@@ -18,16 +19,12 @@ class RNN_Estimator(object):
         """
 
         self._image_size = image_size
-        self.input_shape = [self._image_size, self._image_size, input_channels]
-        self.target_shape = [prediction_size, prediction_size]
+        self.input_shape = [self._image_size, self._image_size]
 
         ## Feed Vars
-        # A Tensor of shape [None, ...]
-        self._inputs = tf.placeholder(tf.float32, shape=[None] + self.input_shape,
-                                      name='inputs')
-        # A Tensor of shape [None, ...]
-        self._targets = tf.placeholder(tf.float32, shape=[None] + self.target_shape,
-                                       name='targets')
+        # A Tensor of shape [None, 227, 227, 3]
+        self._image_input = tf.placeholder(tf.float32, shape=[None] + self.input_shape + [3],
+                                           name='inputs')
         # A scalar
         self.iou = tf.placeholder(dtype=tf.float32, shape=[], name='iou')
         self.failures = tf.placeholder(dtype=tf.float32, shape=[], name='failure_rate')
@@ -36,9 +33,13 @@ class RNN_Estimator(object):
         init_scale = 0.1
         initializer = tf.random_uniform_initializer(-init_scale, init_scale)
         with tf.variable_scope('model', initializer=initializer):
-            self._inputs_unrolled = tf.reshape(self._inputs,
-                                               shape=[-1, reduce(operator.mul, self._inputs.shape.as_list()[1:])])
+            self._inputs_unrolled = tf.reshape(self._image_input,
+                                               shape=[-1, reduce(operator.mul, self._image_input.shape.as_list()[1:])])
             self._create_inference_graph()
+
+            # A Tensor of shape [None, self.prediction_size, self.prediction_size]
+            self._targets = tf.placeholder(tf.float32, shape=[None, self.prediction_size, self.prediction_size],
+                                           name='targets')
             self._targets_unrolled = tf.reshape(self._targets,
                                                 shape=[-1, reduce(operator.mul, self._targets.shape.as_list()[1:])])
             self._create_loss_graph()
@@ -52,41 +53,120 @@ class RNN_Estimator(object):
     def _create_inference_graph(self):
         """ Create a CNN that feeds an RNN. """
 
-        x = self._inputs
-        filters = [16, 32, 32, 32]
-        kernel_sizes = [(5, 5), (5, 5), (3, 3), (3, 3)]
-        strides = [(2, 2), (2, 2), (1, 1), (1, 1)]
-        for i in range(len(kernel_sizes)):
-            x = tf.layers.conv2d(inputs=x, filters=filters[i], name="l{}".format(i + 1), kernel_size=kernel_sizes[i],
-                                 strides=strides[i], padding='same', activation=tf.nn.relu)
+        print('Loading AlexNet weights from bvlc_alexnet.npy')
+        """AlexNet frontend from http://www.cs.toronto.edu/~guerzhoy/tf_alexnet/"""
+        net_data = np.load(open("bvlc_alexnet.npy", "rb"), encoding="latin1").item()
+
+        def conv(input, kernel, biases, k_h, k_w, c_o, s_h, s_w, padding="VALID", group=1):
+            '''From https://github.com/ethereon/caffe-tensorflow'''
+            c_i = input.get_shape()[-1]
+            assert c_i % group == 0
+            assert c_o % group == 0
+            convolve = lambda i, k: tf.nn.conv2d(i, k, [1, s_h, s_w, 1], padding=padding)
+
+            if group == 1:
+                conv = convolve(input, kernel)
+            else:
+                input_groups = tf.split(input, group, 3)
+                kernel_groups = tf.split(kernel, group, 3)
+                output_groups = [convolve(i, k) for i, k in zip(input_groups, kernel_groups)]
+                conv = tf.concat(output_groups, 3)
+            return tf.reshape(tf.nn.bias_add(conv, biases), [-1] + conv.get_shape().as_list()[1:])
+
+        # conv1
+        # conv(11, 11, 96, 4, 4, padding='VALID', name='conv1')
+        conv1W = tf.Variable(net_data["conv1"][0])
+        conv1b = tf.Variable(net_data["conv1"][1])
+        conv1_in = conv(self._image_input, conv1W, conv1b, 11, 11, 96, 4, 4, padding="SAME", group=1)
+        conv1 = tf.nn.relu(conv1_in)
+
+        # lrn1
+        # lrn(2, 2e-05, 0.75, name='norm1')
+        lrn1 = tf.nn.local_response_normalization(conv1, depth_radius=2, alpha=2e-05, beta=0.75, bias=1.0)
+
+        # maxpool1
+        # max_pool(3, 3, 2, 2, padding='VALID', name='pool1')
+        maxpool1 = tf.nn.max_pool(lrn1, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1], padding='VALID')
+
+        # conv2
+        # conv(5, 5, 256, 1, 1, group=2, name='conv2')
+        conv2W = tf.Variable(net_data["conv2"][0])
+        conv2b = tf.Variable(net_data["conv2"][1])
+        conv2_in = conv(maxpool1, conv2W, conv2b, 5, 5, 256, 1, 1, padding="SAME", group=2)
+        conv2 = tf.nn.relu(conv2_in)
+
+        # lrn2
+        # lrn(2, 2e-05, 0.75, name='norm2')
+        lrn2 = tf.nn.local_response_normalization(conv2, depth_radius=2, alpha=2e-05, beta=0.75, bias=1.0)
+
+        # maxpool2
+        # max_pool(3, 3, 2, 2, padding='VALID', name='pool2')
+        maxpool2 = tf.nn.max_pool(lrn2, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1], padding='VALID')
+
+        # conv3
+        # conv(3, 3, 384, 1, 1, name='conv3')
+        conv3W = tf.Variable(net_data["conv3"][0])
+        conv3b = tf.Variable(net_data["conv3"][1])
+        conv3_in = conv(maxpool2, conv3W, conv3b, 3, 3, 384, 1, 1, padding="SAME", group=1)
+        conv3 = tf.nn.relu(conv3_in)
+
+        # conv4
+        # conv(3, 3, 384, 1, 1, group=2, name='conv4')
+        conv4W = tf.Variable(net_data["conv4"][0])
+        conv4b = tf.Variable(net_data["conv4"][1])
+        conv4_in = conv(conv3, conv4W, conv4b, 3, 3, 384, 1, 1, padding="SAME", group=2)
+        conv4 = tf.nn.relu(conv4_in)
+
+        # conv5
+        # conv(3, 3, 256, 1, 1, group=2, name='conv5')
+        conv5W = tf.Variable(net_data["conv5"][0])
+        conv5b = tf.Variable(net_data["conv5"][1])
+        conv5_in = conv(conv4, conv5W, conv5b, 3, 3, 256, 1, 1, padding="SAME", group=2)
+        conv5 = tf.nn.relu(conv5_in)
+
+        # maxpool5
+        # max_pool(3, 3, 2, 2, padding='VALID', name='pool5')
+        maxpool5 = tf.nn.max_pool(conv5, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1], padding='VALID')
+
+        upsample_factor = 3
+        lstm_image_size = (upsample_factor * maxpool5.shape.as_list()[1], upsample_factor * maxpool5.shape.as_list()[2])
+        upsampled = tf.image.resize_nearest_neighbor(maxpool5, lstm_image_size)
+
+        # A Tensor of shape [None, self.prediction_size, self.prediction_size]
+        self._cursor_mask = tf.placeholder(tf.float32, shape=[None, *lstm_image_size], name='cursor_mask')
+        # A Tensor of shape [None, self.prediction_size, self.prediction_size]
+        self._history_mask = tf.placeholder(tf.float32, shape=[None, *lstm_image_size], name='history_mask')
+        x = tf.concat([upsampled, tf.expand_dims(self.cursor_mask, axis=3), tf.expand_dims(self.history_mask, axis=3)],
+                      axis=3)
         # Make x ready to go into an LSTM
         x = flatten(tf.expand_dims(x, axis=0))
 
         num_lstm_filters = 32
-        lstm_cell = ConvLSTMCell(height=self._image_size, width=self._image_size, filters=num_lstm_filters,
-                                 kernel=[3, 3])
+        lstm_cell = ConvLSTMCell(height=lstm_image_size[0], width=lstm_image_size[1],
+                                 filters=num_lstm_filters, kernel=[3, 3])
         self._c_init = tf.zeros([1, lstm_cell.state_size.c], dtype=tf.float32)
         self._h_init = tf.zeros([1, lstm_cell.state_size.h], dtype=tf.float32)
         self._c_in = tf.placeholder(tf.float32, shape=[1, lstm_cell.state_size.c], name='c_in')
         self._h_in = tf.placeholder(tf.float32, shape=[1, lstm_cell.state_size.h], name='h_in')
-        self.seq_length = tf.shape(self._inputs, out_type=tf.int32)[0]
+        self.seq_length = tf.shape(self._image_input, out_type=tf.int32)[0]
         lstm_outputs, self._lstm_final_state = tf.nn.dynamic_rnn(lstm_cell, x,
                                                                  initial_state=tf.contrib.rnn.LSTMStateTuple(self._c_in,
                                                                                                              self._h_in),
                                                                  # sequence_length=tf.expand_dims(self.seq_length,
                                                                  #                                axis=0)
                                                                  )
-        lstm_outputs = tf.squeeze(expand(lstm_outputs, height=self._image_size, width=self._image_size,
+        lstm_outputs = tf.squeeze(expand(lstm_outputs, height=lstm_image_size[0], width=lstm_image_size[1],
                                          filters=num_lstm_filters), axis=0)
 
         # Output Layer
         self._logits = tf.squeeze(tf.layers.conv2d(inputs=lstm_outputs, filters=1, kernel_size=(3, 3), padding='same'),
                                   axis=3)
-        self._logits_unrolled = tf.reshape(self._logits, shape=[-1, self._image_size ** 2])
-        self._logits = tf.reshape(self._logits_unrolled, shape=[-1, self._image_size, self._image_size])
+        self._prediction_size = self._logits.shape.as_list()[1]
+        self._logits_unrolled = tf.reshape(self._logits, shape=[-1, self._prediction_size ** 2])
+        self._logits = tf.reshape(self._logits_unrolled, shape=[-1, self._prediction_size, self._prediction_size])
 
         self._softmax_unrolled = tf.nn.softmax(self._logits_unrolled)
-        self._softmax = tf.reshape(self._softmax_unrolled, shape=[-1] + self.target_shape)
+        self._softmax = tf.reshape(self._softmax_unrolled, shape=[-1, self._prediction_size, self._prediction_size])
 
     def _create_loss_graph(self):
         """ Compute cross entropy loss between targets and predictions. Also compute the L2 error. """
@@ -98,11 +178,11 @@ class RNN_Estimator(object):
                                                  name='cross_entropy')
             self._loss = self._cross_entropy
 
-        self._predictions_coords = [tf.mod(tf.argmax(self._logits_unrolled, dimension=1), self._image_size),
-                                    tf.floordiv(tf.argmax(self._logits_unrolled, dimension=1), self._image_size)]
+        self._predictions_coords = [tf.mod(tf.argmax(self._logits_unrolled, dimension=1), self._prediction_size),
+                                    tf.floordiv(tf.argmax(self._logits_unrolled, dimension=1), self._prediction_size)]
         self._predictions_coords = tf.stack(self._predictions_coords, axis=1)
-        self._target_coords = [tf.mod(tf.argmax(self._targets_unrolled, dimension=1), self._image_size),
-                               tf.floordiv(tf.argmax(self._targets_unrolled, dimension=1), self._image_size)]
+        self._target_coords = [tf.mod(tf.argmax(self._targets_unrolled, dimension=1), self._prediction_size),
+                               tf.floordiv(tf.argmax(self._targets_unrolled, dimension=1), self._prediction_size)]
         self._target_coords = tf.stack(self._target_coords, axis=1)
 
         # Number of pixels correct
@@ -161,31 +241,44 @@ class RNN_Estimator(object):
             [learning_rate_summary, loss_summary, accuracy_summary, error_summary, max_error_summary,
              grad_norm_summary])
 
-        slices = tf.split(self.inputs, self.input_shape[-1], axis=3)
+        # slices = tf.split(self.inputs, 3, axis=3)
         # flat_images = tf.image.rgb_to_grayscale(tf.concat(slices[:3], axis=3))
         # flat_images = tf.expand_dims(
         #     tf.expand_dims(tf.expand_dims(1 / tf.reduce_max(flat_images, axis=[1, 2, 3]), axis=1), axis=2),
         #     axis=3) * flat_images
         # inputs_with_flat_images = tf.concat([flat_images, slices[-2], slices[-1]], axis=3,
         #                                     name='inputs_with_flat_images')
-        inputs_with_flat_images = tf.concat(slices, axis=3, name='inputs_with_flat_images')
-        input_visualization_summary = tf.summary.image('Inputs', inputs_with_flat_images, max_outputs=20)
+        # inputs_with_flat_images = tf.concat(slices, axis=3, name='inputs_with_flat_images')
+        input_visualization_summary = tf.summary.image('Inputs', self._image_input, max_outputs=20)
         output_visualization_summary = tf.summary.image('Outputs', tf.expand_dims(
-            tf.reshape(self.softmax, shape=[-1] + self.target_shape), dim=3), max_outputs=20)
+            tf.reshape(self.softmax, shape=[-1, self._prediction_size, self._prediction_size]), dim=3), max_outputs=20)
         # target_visualization_summary = tf.summary.image('Targets', tf.expand_dims(self.targets, dim=3), max_outputs=20)
         image_summaries = tf.summary.merge([input_visualization_summary, output_visualization_summary])
 
         return scalar_summaries, image_summaries
 
     @property
-    def inputs(self):
-        """ An n-D float32 placeholder with shape `[batch_size, max_duration, input_size]`. """
-        return self._inputs
+    def image_input(self):
+        """ An float32 placeholder Tensor with shape `[...]`. """
+        return self._image_input
+
+    @property
+    def cursor_mask(self):
+        return self._cursor_mask
+
+    @property
+    def history_mask(self):
+        return self._history_mask
 
     @property
     def lstm_init_state(self):
         """ The initial state of the LSTM. """
         return self._c_init, self._h_init
+
+    @property
+    def prediction_size(self):
+        """ The predictions are [prediction_size, prediction_size]"""
+        return self._prediction_size
 
     @property
     def targets(self):
@@ -261,16 +354,17 @@ def evaluate_iou(sess, est, dataset, max_timesteps=10, batch_size=None, logdir=N
         # Try to predict the polygon!
         polygon_complete = False
         for t in range(max_timesteps):
-            history_mask = _create_history_mask(prediction_vertices, len(prediction_vertices), dataset.image_size)
-            cursor_mask = _create_point_mask(cursor, dataset.image_size)
-            state = np.concatenate([image, np.stack([history_mask, cursor_mask], axis=2)], axis=2)
+            history_mask = _create_history_mask(prediction_vertices, len(prediction_vertices), dataset._prediction_size)
+            cursor_mask = _create_point_mask(cursor, dataset._prediction_size)
+            state = image
+            # state = np.concatenate([image, np.stack([history_mask, cursor_mask], axis=2)], axis=2)
             previous_states.append(state)
             # Feed this one state, but use the previous LSTM state.
             # Basically generate the RNN output one step at a time.
             softmax, pred_coords, (lstm_c, lstm_h) = sess.run(
                 [est.softmax, est._predictions_coords, est.lstm_final_state],
-                {est.inputs: np.expand_dims(state, axis=0), est._c_in: lstm_c,
-                 est._h_in: lstm_h})
+                {est.image_input: np.expand_dims(state, axis=0), est.cursor_mask: np.expand_dims(cursor_mask, axis=0),
+                 est.history_mask: np.expand_dims(history_mask, axis=0), est._c_in: lstm_c, est._h_in: lstm_h})
             previous_softmaxes.append(softmax[0])
             cursor = tuple(reversed(pred_coords[0].tolist()))
 
@@ -293,7 +387,8 @@ def evaluate_iou(sess, est, dataset, max_timesteps=10, batch_size=None, logdir=N
                 break
         history_mask = _create_history_mask(prediction_vertices, len(prediction_vertices), dataset.image_size)
         cursor_mask = _create_point_mask(cursor, dataset.image_size)
-        state = np.concatenate([image, np.stack([history_mask, cursor_mask], axis=2)], axis=2)
+        # state = np.concatenate([image, np.stack([history_mask, cursor_mask], axis=2)], axis=2)
+        state = image
         previous_states.append(state)
 
         if not polygon_complete:

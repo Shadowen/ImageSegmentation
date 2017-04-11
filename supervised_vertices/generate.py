@@ -40,8 +40,8 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
 
     many_samples = [
-        create_valid_polygon(image_size=32, shape_complexity=4, min_area=20, reduction_tolerance=5) for _
-        in range(10000)]
+        create_valid_polygon(image_size=227, shape_complexity=5, min_area=200, reduction_tolerance=5) for _
+        in range(5000)]
 
     # Preview regular shapes
     # for i in range(len(many_samples)):
@@ -71,4 +71,4 @@ if __name__ == '__main__':
     #     display_samples(xs, truths)
     #     plt.show(block=True)
 
-    np.save('dataset_polygons', many_samples)
+    np.save('polygons_5-sided', many_samples)

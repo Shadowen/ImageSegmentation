@@ -4,7 +4,7 @@ import numpy as np
 from scipy.misc import imread, imresize
 
 
-def get_train_and_valid_datasets(filename, image_size, input_channels, prediction_size, is_local=True):
+def get_train_and_valid_datasets(filename, image_size, prediction_size, is_local=True):
     """
     :param filename:
     :param image_size:
@@ -46,7 +46,6 @@ def get_train_and_valid_datasets(filename, image_size, input_channels, predictio
                 images.append(image)
             datasets.append(Dataset(np.array(data),
                                     image_size=image_size,
-                                    input_channels=input_channels,
                                     prediction_size=prediction_size,
                                     images=np.array(images)))
 
@@ -56,15 +55,17 @@ def get_train_and_valid_datasets(filename, image_size, input_channels, predictio
         return tuple(datasets)
     else:
         data = np.load(filename)
-        # poly_verts, ground_truths = [np.array([np.array(d[idx]) for idx in range(d.shape[0])]) for d in
-        #                              [data[:, 0], data[:, 1]]]
-        # poly_verts = (poly_verts * (prediction_size / image_size)).tolist()
-        # ground_truths = ground_truths.tolist()
-        # for idx in range(len(ground_truths)):
-        #     ground_truths[idx] = np.array(imresize(ground_truths[idx], [image_size, image_size]), dtype=np.dtype('O'))
-        # ground_truths = np.array(ground_truths, dtype=np.dtype('O'))
-        # data = np.array([(np.floor(p).astype(np.int8), g) for p, g in zip(poly_verts, ground_truths)])
-        # del poly_verts, ground_truths
+        poly_verts, ground_truths = (np.array(d) for d in zip(*data))
+        original_image_size = ground_truths[0].shape[0]
+        poly_verts = np.array([np.array(p) for p in poly_verts]) * (prediction_size / original_image_size)
+        new_ground_truths = np.empty((ground_truths.shape[0], image_size, image_size))
+        if image_size != original_image_size:
+            for idx in range(len(ground_truths)):
+                new_ground_truths[idx] = np.array(imresize(ground_truths[idx], (image_size, image_size)),
+                                                  dtype=np.dtype('O'))
+        new_ground_truths = np.array(new_ground_truths, dtype=np.dtype('O'))
+        data = np.array([(np.floor(p).astype(np.int8), g) for p, g in zip(poly_verts, new_ground_truths)])
+        del poly_verts, ground_truths, new_ground_truths
         print('{} polygons loaded from {}.'.format(data.shape[0], filename))
         valid_size = data.shape[0] // 10
         training_data = data[valid_size:]
@@ -74,19 +75,16 @@ def get_train_and_valid_datasets(filename, image_size, input_channels, predictio
 
         return Dataset(training_data,
                        image_size=image_size,
-                       input_channels=input_channels,
                        prediction_size=prediction_size), \
                Dataset(validation_data,
                        image_size=image_size,
-                       input_channels=input_channels,
                        prediction_size=prediction_size)
 
 
 class Dataset():
-    def __init__(self, data, image_size, input_channels, prediction_size, images=None):
+    def __init__(self, data, image_size, prediction_size, images=None):
         self._data = data
         self._images = images
-        self._input_channels = input_channels
         self._image_size = image_size
         self._prediction_size = prediction_size
 
@@ -96,53 +94,7 @@ class Dataset():
         :return: An NumPy array of shape [self._image_size, self._image_size].
             This is the requested image for the given index. If no images have been loaded, generates an image.
         """
-        return self._images[idx] if self._images is not None else np.expand_dims(_create_image(self._data[idx, 1]),
-                                                                                 axis=2)
-
-    def get_batch_for_cnn(self, batch_size=50):
-        """
-        :param batch_size:
-        :param max_timesteps:
-        :return: tuple(batch_x, batch_t)
-        where
-            batch_x is a NumPy array of shape [batch_size, 32, 32, 5]
-            batch_t is a NumPy array of shape [batch_size, 32, 32]
-        """
-        batch_indices = np.random.choice(self._data.shape[0], batch_size, replace=False)
-
-        batch_x = np.zeros([batch_size, self._image_size, self._image_size, 3])
-        batch_t = np.zeros([batch_size, self._image_size, self._image_size])
-        if self._images is not None:
-            batch_images = self._images[batch_indices]
-            for idx, ((vertices, truth), image) in enumerate(zip(self._data[batch_indices], batch_images)):
-                x, t = self._create_sample(self._image_size, vertices, truth, image)
-                batch_x[idx] = x
-                batch_t[idx] = t
-        else:
-            for idx, (vertices, truth) in enumerate(self._data[batch_indices]):
-                x, t = self._create_sample(self._image_size, vertices, truth)
-                batch_x[idx] = x
-                batch_t[idx] = t
-
-        return batch_x, batch_t
-
-    def _create_sample(self, image_size, poly_verts, ground_truth, image=None):
-        total_num_verts = len(poly_verts)
-
-        image = image if image is not None else np.expand_dims(_create_image(ground_truth),
-                                                               axis=2)  # TODO use self._get_image
-        start_idx = np.random.randint(total_num_verts + 1)
-        num_verts = np.random.randint(total_num_verts)
-        poly_verts = np.roll(poly_verts, start_idx, axis=0)
-
-        history_mask = _create_history_mask(poly_verts, num_verts + 1, image_size)
-        cursor_mask = _create_point_mask(poly_verts[num_verts], image_size)
-
-        state = np.concatenate([image, np.expand_dims(history_mask, axis=2), np.expand_dims(cursor_mask, axis=2)],
-                               axis=2)
-        next_point = np.array(poly_verts[(num_verts + 1) % total_num_verts])
-
-        return state, _create_point_mask(next_point, image_size)
+        return self._images[idx] if self._images is not None else _create_image(self._data[idx, 1])
 
     def get_batch_for_rnn(self, batch_size=50, max_timesteps=5):
         """
@@ -175,15 +127,16 @@ class Dataset():
         :return: tuple(d, x, t, poly_verts)
         where
             d is a NumPy array of shape []
-            x is a NumPy array of shape [max_timesteps, image_size, image_size, 3]
+            images is a NumPy array of shape [max_timesteps, image_size, image_size, 3]
+            cursors is a NumPy array of shape [max_timesteps, prediction_size, prediction_size]
             t is a NumPy array of shape [max_timesteps, prediction_size, prediction_size]
             poly_verts is a Python List of length `batch_size` containing the vertices used to generate the polygon
         """
         idx = np.random.choice(self._data.shape[0], 1, replace=False)[0]
 
         vertices, truth = self._data[idx]
-        d, x, t = self._create_sample_sequence(vertices, image=self._get_image(idx))
-        return d, x, t, vertices
+        d, images, cursors, history, t = self._create_sample_sequence(vertices, image=self._get_image(idx))
+        return d, images, cursors, history, t, vertices
 
     def _create_sample_sequence(self, poly_verts, image=None):
         """
@@ -198,19 +151,23 @@ class Dataset():
         start_idx = np.random.randint(total_num_verts + 1)
         poly_verts = np.roll(poly_verts, start_idx, axis=0)
 
-        inputs = np.empty([total_num_verts, self._image_size, self._image_size, self._input_channels])
+        images = np.empty([total_num_verts, self._image_size, self._image_size, 3])
+        cursors = np.empty([total_num_verts, self._prediction_size, self._prediction_size], dtype=np.uint16)
+        histories = np.empty([total_num_verts, self._prediction_size, self._prediction_size], dtype=np.uint16)
         targets = np.empty([total_num_verts, self._prediction_size, self._prediction_size], dtype=np.uint16)
         for idx in range(total_num_verts):
-            history_mask = np.expand_dims(_create_history_mask(poly_verts, idx + 1, self._image_size), axis=2)
-            cursor_mask = np.expand_dims(_create_point_mask(poly_verts[idx], self._image_size), axis=2)
+            history_mask = _create_history_mask(poly_verts, idx + 1, self._prediction_size)
+            cursor_mask = _create_point_mask(poly_verts[idx], self._prediction_size)
 
-            state = np.concatenate([image, history_mask, cursor_mask], axis=2)
+            state = image
             next_point = np.array(poly_verts[(idx + 1) % total_num_verts])
 
-            inputs[idx, :, :] = state
+            images[idx, :, :] = state
+            cursors[idx, :, :] = cursor_mask
+            histories[idx, :, :] = history_mask
             targets[idx, :, :] = _create_point_mask(next_point, self._prediction_size)
 
-        return total_num_verts, inputs, targets
+        return total_num_verts, images, cursors, histories, targets
 
     def raw_sample(self, batch_size):
         """Sample a minibatch from the dataset.
@@ -221,8 +178,8 @@ class Dataset():
         """
         batch_indices = np.random.choice(self._data.shape[0], batch_size, replace=False)
         batch_verts, batch_t = zip(*self._data[batch_indices])
-        batch_images = self._images[batch_indices] if self._images is not None else np.expand_dims(batch_t,
-                                                                                                   axis=3)  # TODO generate images
+        batch_images = self._images[batch_indices] if self._images is not None else np.array(
+            [self._get_image(idx) for idx in batch_indices])
         return zip(batch_images, batch_verts, batch_t)
 
     def __len__(self):
@@ -244,7 +201,7 @@ class Dataset():
 
 def _create_image(ground_truth):
     """ Apply distortion to the ground truth to generate the image the algorithm will see. """
-    image = np.copy(ground_truth)
+    image = np.stack([ground_truth] * 3, axis=2)
 
     # # Salt and pepper noise
     # amount = 0.03

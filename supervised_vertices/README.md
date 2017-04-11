@@ -273,6 +273,11 @@ Does this work better because it actually learns something about the shapes, or 
 - [Generalized Advantage Estimation](https://arxiv.org/pdf/1506.02438.pdf)
 
 ### TODO
+
+- increase receptive field
+    - AlexNet frontend
+
+
 - Compare supervised/RL/combined
 - Summaries
     - Actions taken
@@ -290,6 +295,4 @@ Does this work better because it actually learns something about the shapes, or 
 
 
 - check ordering of vertices
-- increase receptive field
-    - AlexNet frontend
 - check without history, with cursor
