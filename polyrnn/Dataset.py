@@ -7,7 +7,7 @@ from polyrnn.util import *
 
 
 def get_train_and_valid_datasets(filename, max_timesteps, image_size, prediction_size, history_length, is_local=True,
-                                 load_max_images=None):
+                                 load_max_images=None, validation_set_percentage=0.1):
     """
     :param filename:
     :param image_size:
@@ -72,7 +72,7 @@ def get_train_and_valid_datasets(filename, max_timesteps, image_size, prediction
             all_images[idx, ::] = image
             all_vertices[idx] = np.floor(vertices * prediction_size).astype(int)
 
-        validation_set_size = total_num_images // 10
+        validation_set_size = np.floor(total_num_images * validation_set_percentage).astype(int)
         train_images = all_images[validation_set_size:]
         valid_images = all_images[:validation_set_size]
         train_vertices = all_vertices[validation_set_size:]
@@ -136,9 +136,7 @@ class Dataset():
         """
         total_num_verts = len(poly_verts)
 
-        # start_idx = np.random.randint(total_num_verts) if start_idx is None else start_idx
-        # TODO
-        start_idx = np.random.choice([0]) if start_idx is None else start_idx
+        start_idx = np.random.randint(total_num_verts) if start_idx is None else start_idx  # TODO
 
         poly_verts = np.roll(poly_verts, start_idx, axis=0)
 

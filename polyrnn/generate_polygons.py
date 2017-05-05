@@ -1,7 +1,8 @@
+import os
+import shutil
+
 import scipy.ndimage
 import scipy.spatial
-import shutil
-import os
 from skimage.io import imsave
 
 from polyrnn.util import *
