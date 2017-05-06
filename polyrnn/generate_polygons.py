@@ -61,8 +61,8 @@ if __name__ == '__main__':
     assert (abs(get_angle(np.array([0, 0]), np.array([1, 1]), np.array([2, 2])) - 180) < 0.01)
 
     # Execute
-    save_dir = '/home/wesley/data/tiny-polygons'
-    num_images = 100
+    save_dir = '/data/polygons_dataset'
+    num_images = 10000
     if os.path.exists(save_dir):
         shutil.rmtree(save_dir)
     os.makedirs(save_dir)

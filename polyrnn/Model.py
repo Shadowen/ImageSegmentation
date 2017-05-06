@@ -4,7 +4,7 @@ from abc import abstractmethod, abstractproperty
 import numpy as np
 import tensorflow as tf
 
-from polyrnn.util import lazyproperty
+from polyrnn.util import lazyproperty, create_shape_mask
 
 
 class Model():
@@ -33,15 +33,30 @@ class Model():
                 self.targets_dense = targets_x * prediction_size + targets_y
 
             self._build_graph()
+            num_samples = tf.reduce_sum(self._duration_pl)
+            self.sequence_mask = tf.sequence_mask(self._duration_pl, max_timesteps)
+            self._prediction_argmax = tf.argmax(self.prediction_logits, axis=2)
+            self.predictions_dense = tf.cast(self._prediction_argmax, dtype=tf.int32)
+            # Accuracy
+            masked_correct = tf.logical_and(tf.equal(self.targets_dense, self.predictions_dense), self.sequence_mask)
+            self._accuracy_op = tf.count_nonzero(masked_correct, dtype=tf.int32) / num_samples
+            # L2 Error
+            individual_errors = tf.norm(
+                tf.cast(tf.cast(self.targets_pl, dtype=tf.int64) - self.prediction_max, dtype=tf.float64),
+                axis=2) * tf.cast(self.sequence_mask, dtype=tf.float64)
+            self._avg_error_op = tf.reduce_sum(individual_errors) / tf.cast(num_samples, dtype=tf.float64)
+            self._max_error_op = tf.reduce_max(individual_errors)
             # Make sure everything exists
             for p in [self.rnn_initial_state_pl, self.rnn_zero_state, self.duration_pl, self.rnn_final_state,
-                      self.prediction_logits, self.trainable_variables, self.loss, self.train_op]:
+                      self.prediction_logits, self.trainable_variables, self.loss, self.train_op, self.summary_writer]:
                 if p is None:
                     raise NotImplementedError()
 
-            training_summaries, validation_summaries = self._create_summaries()
-            self._training_summary_ops = tf.summary.merge(training_summaries)
-            self._validation_summary_ops = tf.summary.merge(validation_summaries)
+        self._training_summary_ops = tf.summary.merge(self._create_summaries('train'))
+        self._validation_summary_ops = tf.summary.merge(self._create_summaries('valid'))
+
+        self._iou_pl = tf.placeholder(tf.float32, shape=[], name='iou')
+        self._iou_summary_op = tf.summary.scalar('iou', self._iou_pl)
 
     @abstractmethod
     def _build_graph(self):
@@ -55,9 +70,9 @@ class Model():
     def rnn_zero_state(self):
         pass
 
-    @abstractproperty
+    @property
     def duration_pl(self):
-        pass
+        return self._duration_pl
 
     @abstractproperty
     def rnn_final_state(self):
@@ -67,14 +82,15 @@ class Model():
     def prediction_logits(self):
         pass
 
-    @abstractproperty
+    @lazyproperty
     def prediction_max(self):
-        pass
+        return tf.stack(
+            [self._prediction_argmax // self.prediction_size, self._prediction_argmax % self.prediction_size], axis=2)
 
     @lazyproperty
     def loss(self):
-        return tf.reduce_mean(
-            tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.targets_dense, logits=self.prediction_logits))
+        return tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.targets_dense,
+                                                                             logits=self.prediction_logits))
 
     @property
     def trainable_variables(self):
@@ -88,17 +104,23 @@ class Model():
         return optimizer.apply_gradients(zip(clipped_gradients, self.trainable_variables),
                                          global_step=self.global_step)
 
-    def _create_summaries(self):
+    @lazyproperty
+    def summary_writer(self):
+        return tf.summary.FileWriter(logdir=self._filepath, graph=self.sess.graph)
+
+    def _create_summaries(self, prefix):
         """
-        :return: [training summaries], [validation summaries]
+        :param prefix: Either 'train' or 'valid'
+        To add summaries in a subclass, override this and call super, appending your custom summaries to the list returned
+        :return: list [summaries]
         """
-        self._summary_writer = tf.summary.FileWriter(logdir=self._filepath, graph=self.sess.graph)
 
-        self._loss_summary_op = tf.summary.scalar('Loss', self.loss)
+        loss_summary_op = tf.summary.scalar(prefix + '/loss', self.loss)
+        accuracy_summary_op = tf.summary.scalar(prefix + '/accuracy', self._accuracy_op)
+        avg_error_summary_op = tf.summary.scalar(prefix + '/avg_error', self._avg_error_op)
+        max_error_summary_op = tf.summary.scalar(prefix + '/max_error', self._max_error_op)
 
-        self._validation_loss_summary_op = tf.summary.scalar('Validation_Loss', self.loss)
-
-        return [self._loss_summary_op], [self._validation_loss_summary_op]
+        return [loss_summary_op, accuracy_summary_op, avg_error_summary_op, max_error_summary_op]
 
     @lazyproperty
     def saver(self):
@@ -122,21 +144,45 @@ class Model():
                                            feed_dict={self.image_pl: images, self.duration_pl: durations,
                                                       self.history_pl: histories, self.targets_pl: targets,
                                                       **additional_feed_args})
-        self._summary_writer.add_summary(summaries, global_step=step)
+        self.summary_writer.add_summary(summaries, global_step=step)
 
     def validate(self, images, durations, histories, targets, additional_feed_args={}):
         step, summaries = self.sess.run([self.global_step, self._validation_summary_ops],
                                         feed_dict={self.image_pl: images, self.duration_pl: durations,
                                                    self.history_pl: histories, self.targets_pl: targets,
                                                    **additional_feed_args})
-        self._summary_writer.add_summary(summaries, global_step=step)
+        self.summary_writer.add_summary(summaries, global_step=step)
 
-    def predict_logits_one_step(self, images, histories, additional_feed_args={}):
-        return self.sess.run(self.prediction_logits,
+    def predict_one_step(self, images, histories, rnn_state, additional_feed_args={}):
+        return self.sess.run([self.prediction_max, self.rnn_final_state],
                              feed_dict={self.image_pl: images, self.duration_pl: np.ones([images.shape[0]]),
-                                        self.history_pl: histories, **additional_feed_args})
+                                        self.history_pl: histories, self.rnn_initial_state_pl: rnn_state,
+                                        **additional_feed_args})
 
-    def predict_one_step(self, images, durations, histories, additional_feed_args={}):
-        self.sess.run(self.prediction_max,
-                      feed_dict={self.image_pl: images, self.duration_pl: durations,
-                                 self.history_pl: histories, **additional_feed_args})
+    def validate_iou(self, images, true_vertices, summary_prefix='valid', additional_feed_args={}):
+        batch_size = images.shape[0]
+        predicted_vertices = np.empty([batch_size, self.max_timesteps, 2])
+
+        histories = np.zeros([batch_size, self.max_timesteps, 28, 28, self.history_length])
+        step, rnn_state = self.sess.run([self.global_step, self.rnn_zero_state], feed_dict={self.image_pl: images})
+        for i in range(self.max_timesteps):
+            out, rnn_state = self.predict_one_step(images, histories, rnn_state, **additional_feed_args)
+            predicted_vertices[:, i, :] = out[:, 0, :]
+
+            predicted_mask = np.zeros([batch_size, self.prediction_size, self.prediction_size])
+            predicted_mask[:, out[:, 0, 1], out[:, 0, 0]] = 1
+
+            histories = np.roll(histories, axis=1, shift=1)
+            histories[:, 0, :, :, 0] = predicted_mask
+
+        ious = []
+        for i in range(predicted_vertices.shape[0]):
+            predicted_mask = create_shape_mask(predicted_vertices[i], self.prediction_size)
+            true_mask = create_shape_mask(true_vertices[i], self.prediction_size)
+            intersection = np.count_nonzero(np.logical_and(predicted_mask, true_mask))
+            union = np.count_nonzero(np.logical_or(predicted_mask, true_mask))
+            ious.append(intersection / union)
+
+        summary = tf.Summary(value=[
+            tf.Summary.Value(tag=summary_prefix + '/iou' if summary_prefix else'iou', simple_value=np.mean(ious))])
+        self.summary_writer.add_summary(summary, global_step=step)

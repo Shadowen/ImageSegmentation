@@ -10,19 +10,20 @@ from polyrnn.convLSTM import ConvLSTMCell
 class ExperimentModel(Model.Model):
     def _build_graph(self):
         # conv1 [batch, x, y, c]
-        conv1 = tf.layers.conv2d(inputs=self.image_pl / 255, filters=32, kernel_size=[1, 1], padding='same',
+        conv1 = tf.layers.conv2d(inputs=self.image_pl / 255, filters=32, kernel_size=[14, 14], padding='same',
                                  activation=tf.nn.relu)
-        # tiled_conv1 [batch, timestep, c]
-        tiled_conv1 = tf.tile(tf.expand_dims(conv1, axis=1), multiples=[1, self.max_timesteps, 1, 1, 1])
-
-        concat = tf.concat([tiled_conv1, self.history_pl], axis=4)
+        # conv2 [batch, x, y, c]
+        conv2 = tf.layers.conv2d(inputs=conv1, filters=32, kernel_size=[5, 5], padding='same', activation=tf.nn.relu)
+        # tiled [batch, timestep, c]
+        tiled = tf.tile(tf.expand_dims(conv2, axis=1), multiples=[1, self.max_timesteps, 1, 1, 1])
+        concat = tf.concat([tiled, self.history_pl], axis=4)
 
         with tf.variable_scope('rnn'):
             # Make placeholder time major for RNN. (see https://github.com/tensorflow/tensorflow/pull/5142)
             rnn_input = tf.transpose(concat, (1, 0, 2, 3, 4))
 
             rnn_cell = lambda: ConvLSTMCell(shape=[28, 28], filters=16, kernel=[3, 3])
-            rnn_layers = 1
+            rnn_layers = 2
             multi_rnn_cell = tf.contrib.rnn.MultiRNNCell([rnn_cell() for _ in range(rnn_layers)])
             self._rnn_zero_state = multi_rnn_cell.zero_state(self.batch_size, dtype=tf.float32)
             self._rnn_initial_state_pl = tuple(tf.contrib.rnn.LSTMStateTuple(
@@ -79,20 +80,20 @@ if __name__ == '__main__':
                                                           max_timesteps=max_timesteps,
                                                           image_size=image_size, prediction_size=prediction_size,
                                                           history_length=history_length, is_local=True,
-                                                          load_max_images=1, validation_set_percentage=0)
+                                                          load_max_images=10, validation_set_percentage=0.1)
 
     with tf.Session() as sess:
         model_dir = '/home/wesley/data/{}/'.format(os.path.splitext(os.path.basename(__file__))[0])
         model = ExperimentModel(sess, max_timesteps, image_size, prediction_size, history_length, model_dir)
         sess.run(tf.global_variables_initializer())
-        # model.maybe_restore()
+        model.maybe_restore()
 
-        total_steps = 1000
+        total_steps = 10000
         for step_num in range(total_steps):
-            batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=1)
+            batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=8)
             model.train(batch_images, batch_d, batch_h, batch_t)
 
-            # if step_num % 100 == 0 and len(valid_data) > 0:
-            #     batch_d, batch_images, batch_h, batch_t, batch_vertices = valid_data.get_batch_for_rnn(batch_size=1)
-            #     model.validate(batch_images, batch_d, batch_h, batch_t)
-            # model.save()
+            if step_num % 100 == 0:
+                batch_d, batch_images, batch_h, batch_t, batch_vertices = valid_data.get_batch_for_rnn(batch_size=1)
+                model.validate(batch_images, batch_d, batch_h, batch_t)
+            model.save()

@@ -1,7 +1,5 @@
 import os
 
-import matplotlib.pyplot as plt
-import numpy as np
 import tensorflow as tf
 
 from polyrnn import Model
@@ -62,7 +60,7 @@ class ExperimentModel(Model.Model):
             feed_dict={self.image_pl: images, self.duration_pl: durations,
                        self.history_pl: histories, self.targets_pl: targets,
                        **additional_feed_args})
-        self._summary_writer.add_summary(summaries, global_step=step)
+        self.summary_writer.add_summary(summaries, global_step=step)
         print('Step {}: Loss={}\tAcc={}'.format(step, loss, acc))
 
 
@@ -73,41 +71,24 @@ if __name__ == '__main__':
     history_length = 1
 
     global_step = tf.Variable(0, name='global_step', trainable=False)
-    train_data, valid_data = get_train_and_valid_datasets('/home/wesley/data/tiny-polygons',
+    train_data, valid_data = get_train_and_valid_datasets('/home/wesley/data/polygons_dataset',
                                                           max_timesteps=max_timesteps,
                                                           image_size=image_size, prediction_size=prediction_size,
                                                           history_length=history_length, is_local=True,
-                                                          load_max_images=1, validation_set_percentage=0)
+                                                          load_max_images=4, validation_set_percentage=0.5)
 
     with tf.Session() as sess:
         model_dir = '/home/wesley/data/{}/'.format(os.path.splitext(os.path.basename(__file__))[0])
         model = ExperimentModel(sess, max_timesteps, image_size, prediction_size, history_length, model_dir)
         sess.run(tf.global_variables_initializer())
-        # model.maybe_restore()
+        model.maybe_restore()
 
-        total_steps = 1200
+        total_steps = 500
         for step_num in range(total_steps):
-            batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=1,
-                                                                                                   start_idx=None)
+            batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=2)
             model.train(batch_images, batch_d, batch_h, batch_t)
-        # model.save()
 
-        batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=1,
-                                                                                               start_idx=None)
-        print(batch_vertices)
-        p = model.predict_logits_one_step(batch_images, batch_h)
-        plt.figure()
-        plt.title('Image')
-        plt.imshow(batch_images[0])
-        plt.figure()
-        plt.title('History')
-        plt.imshow(batch_h[0, 0, :, :, 0])
-        plt.figure()
-        plt.title('Truth')
-        t = np.zeros([28, 28])
-        t[batch_t[0, 0, 1], batch_t[0, 0, 0]] = 1
-        plt.imshow(t)
-        plt.figure()
-        plt.title('Prediction')
-        plt.imshow(np.rollaxis(np.reshape(p[0][0], [28, 28]), axis=1), cmap='Greys')  # May want to softmax this...
-        plt.show(block=True)
+            if step_num % 100 == 0:
+                batch_images, batch_vertices = train_data.raw_sample(batch_size=2)
+                model.validate_iou(batch_images, batch_vertices, summary_prefix='train')
+                model.save()

@@ -27,12 +27,6 @@ class ExperimentModel(Model.Model):
                                                                   sequence_length=self._duration_pl,
                                                                   initial_state=self._rnn_initial_state_pl)
         self._prediction_logits = tf.layers.dense(inputs=rnn_output, units=prediction_size ** 2, name='prediction')
-        self.predictions_dense = tf.cast(tf.argmax(self._prediction_logits, axis=2), dtype=tf.int32)
-
-        masked_correct = tf.logical_and(tf.equal(self.targets_dense, self.predictions_dense),
-                                        tf.sequence_mask(self._duration_pl, max_timesteps))
-        self.accuracy_op = tf.count_nonzero(masked_correct, dtype=tf.int32) / tf.reduce_sum(
-            self._duration_pl)
 
     @lazyproperty
     def rnn_initial_state_pl(self):
@@ -43,10 +37,6 @@ class ExperimentModel(Model.Model):
         return self._rnn_zero_state
 
     @lazyproperty
-    def duration_pl(self):
-        return self._duration_pl
-
-    @lazyproperty
     def rnn_final_state(self):
         return self._rnn_final_state
 
@@ -54,30 +44,15 @@ class ExperimentModel(Model.Model):
     def prediction_logits(self):
         return self._prediction_logits
 
-    @lazyproperty
-    def prediction_max(self):
-        return self._prediction_max
-
-    def _create_summaries(self):
-        training_summaries, validation_summaries = super(ExperimentModel, self)._create_summaries()
-
-        accuracy_summary_op = tf.summary.scalar('Accuracy', self.accuracy_op)
-        training_summaries.append(accuracy_summary_op)
-
-        validation_accuracy_summary_op = tf.summary.scalar('Validation_Accuracy', self.accuracy_op)
-        validation_summaries.append(validation_accuracy_summary_op)
-        return training_summaries, validation_summaries
-
-    def train(self, images, durations, histories, targets, additional_feed_args={}):
-        step, summaries, loss, acc, t, p, _ = self.sess.run(
-            [self.global_step, self._training_summary_ops, self.loss, self.accuracy_op, self.targets_dense,
-             self.predictions_dense,
-             self.train_op],
+    def validate(self, images, durations, histories, targets, additional_feed_args={}):
+        step, summaries, loss, acc, a_err, m_err = self.sess.run(
+            [self.global_step, self._validation_summary_ops, self.loss, self._accuracy_op, self._avg_error_op,
+             self._max_error_op],
             feed_dict={self.image_pl: images, self.duration_pl: durations,
                        self.history_pl: histories, self.targets_pl: targets,
                        **additional_feed_args})
         self._summary_writer.add_summary(summaries, global_step=step)
-        print('Step {}: Loss={}\tAcc={}'.format(step, loss, acc))
+        print('Step {}: Loss={}\tAcc={}\tAvg_Error={}\tMax_Error={}'.format(step, loss, acc, a_err, m_err))
 
 
 if __name__ == '__main__':
@@ -101,13 +76,14 @@ if __name__ == '__main__':
 
         total_steps = 1200
         for step_num in range(total_steps):
-            batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=1,
-                                                                                                   start_idx=None)
+            batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=1)
             model.train(batch_images, batch_d, batch_h, batch_t)
+
+            batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=10)
+            model.validate(batch_images, batch_d, batch_h, batch_t)
         # model.save()
 
-        batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=1,
-                                                                                               start_idx=None)
+        batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=1)
         print(batch_vertices)
         p = model.predict_logits_one_step(batch_images, batch_h)
         plt.figure()

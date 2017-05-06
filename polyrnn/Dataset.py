@@ -151,8 +151,8 @@ class Dataset():
         return total_num_verts, histories, targets, poly_verts
 
     def raw_sample(self, batch_size):
-        """Sample a minibatch from the dataset.
-        :return: zip(batch_images, batch_verts)
+        """Sample a minibatch of images and vertices only from the dataset.
+        :return: (batch_images, batch_verts)
         where
             batch_images is a NumPy array.
             batch_verts is a Python list of polygon vertices (as NumPy arrays).
@@ -160,7 +160,7 @@ class Dataset():
         batch_indices = np.random.choice(self._images.shape[0], batch_size, replace=False)
         batch_images = self._images[batch_indices]
         batch_verts = self._vertices[batch_indices]
-        return zip(batch_images, batch_verts)
+        return batch_images, batch_verts
 
     def __len__(self):
         assert self._images.shape[0] == self._vertices.shape[0]
