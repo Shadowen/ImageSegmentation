@@ -83,6 +83,7 @@ if __name__ == '__main__':
         # model.maybe_restore()
 
         total_steps = 100000
+        # Wait until at least step 20000 to see decent? results
         for step_num in range(total_steps):
             batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=16)
             model.train(batch_images, batch_d, batch_h, batch_t)

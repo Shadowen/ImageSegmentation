@@ -69,7 +69,7 @@ if __name__ == '__main__':
     print('Generating images...')
     for i in range(num_images):
         print('\rImage {}/{}...'.format(i + 1, num_images), end='')
-        vertices, image = create_valid_polygon(image_size=224, shape_complexity=5, min_distance=10, max_distance=100,
+        vertices, image = create_valid_polygon(image_size=28, shape_complexity=5, min_distance=10, max_distance=100,
                                                min_area=10,
                                                reduction_tolerance=30)
         imsave('{}/{}.jpg'.format(save_dir, i), image)

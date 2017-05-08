@@ -1,10 +1,18 @@
+import io
 import os
 from abc import abstractmethod, abstractproperty
 
+import matplotlib
+import matplotlib.lines
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+from scipy.misc import imresize
 import numpy as np
 import tensorflow as tf
 
-from polyrnn.util import lazyproperty, create_shape_mask
+from polyrnn.util import lazyproperty, create_shape_mask, iterate_in_ntuples
 
 
 class Model():
@@ -159,7 +167,49 @@ class Model():
                                         self.history_pl: histories, self.rnn_initial_state_pl: rnn_state,
                                         **additional_feed_args})
 
+    def _create_summary_image(self, image, true_vertices, predicted_vertices):
+        """
+        Plots the image, true vertices, and predicted vertices in matplotlib and returns it as a tf.Summary.Image
+        Usage:
+            image_summary = tf.Summary(value=[tf.Summary.Value(
+                    tag=('image', image=Model._create_summary_image(image, true_vertices, predicted_vertices))])
+            summary_writer.add_summary(image_summary, global_step=step)
+
+        :param image: A NumPy array of shape (self.image_size, self.image_size, 3)
+        :param true_vertices: a NumPy array of shape (self.max_timesteps, 2)
+        :param predicted_vertices: a NumPy array of shape (self.max_timesteps, 2)
+        :returns: tf.Summary.Image
+        """
+        plt.ioff()
+        fig = plt.figure()
+        ax = plt.gca()
+        resized_image = imresize(image, [self.image_size, self.image_size], interp='nearest')
+        plt.imshow(resized_image)
+        for e, v in enumerate(true_vertices):
+            ax.add_artist(plt.Circle(v, radius=0.5, color='lightgreen', alpha=0.5))
+        for a, b in iterate_in_ntuples(true_vertices, n=2):
+            ax.add_line(matplotlib.lines.Line2D([a[0], b[0]], [a[1], b[1]], color='lawngreen'))
+        for e, v in enumerate(predicted_vertices):
+            ax.add_artist(plt.Circle(v, radius=0.5, color='salmon', alpha=0.5))
+            plt.text(v[0], v[1], e, color='red')
+        for a, b in iterate_in_ntuples(predicted_vertices, n=2):
+            ax.add_line(matplotlib.lines.Line2D([a[0], b[0]], [a[1], b[1]], color='tomato'))
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        plt.close(fig)
+        buf.seek(0)
+        return tf.Summary.Image(encoded_image_string=buf.getvalue())
+
     def validate_iou(self, images, true_vertices, summary_prefix='valid', additional_feed_args={}):
+        """
+        Validates the IoU (Intersection over Union) for the given set of images and vertices.
+
+        :param images: a NumPy np.float array of shape (batch_size, self.image_size, self.image_size, 32)
+        :param true_vertices: a NumPy array of shape (batch_size, self.max_timesteps, 2)
+        :param summary_prefix: a string to prefix the generated summary names with
+        :param additional_feed_args: Dictionary of nonstandard values that should be fed during prediction (ie. dropout)
+        :return:
+        """
         batch_size = images.shape[0]
         predicted_vertices = np.empty([batch_size, self.max_timesteps, 2])
 
@@ -183,6 +233,13 @@ class Model():
             union = np.count_nonzero(np.logical_or(predicted_mask, true_mask))
             ious.append(intersection / union)
 
+            # Summary stuff
+            image_summary = tf.Summary(
+                value=[tf.Summary.Value(
+                    tag=(summary_prefix + '/iou_image_{}' if summary_prefix else 'iou_image_{}').format(i),
+                    image=self._create_summary_image(images[i], true_vertices[i], predicted_vertices[i]))])
+            self.summary_writer.add_summary(image_summary, global_step=step)
+
         summary = tf.Summary(value=[
-            tf.Summary.Value(tag=summary_prefix + '/iou' if summary_prefix else'iou', simple_value=np.mean(ious))])
+            tf.Summary.Value(tag=summary_prefix + '/iou' if summary_prefix else 'iou', simple_value=np.mean(ious))])
         self.summary_writer.add_summary(summary, global_step=step)
