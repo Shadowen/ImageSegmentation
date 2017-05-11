@@ -1,4 +1,5 @@
 import os
+import shutil
 
 import tensorflow as tf
 
@@ -11,14 +12,34 @@ from polyrnn.util import lazyproperty
 class ExperimentModel(Model.Model):
     def _build_graph(self):
         # conv1 [batch, x, y, c]
-        conv1 = tf.layers.conv2d(inputs=self.image_pl / 255, filters=32, kernel_size=[14, 14], padding='same',
-                                 activation=tf.nn.relu)
+        conv1 = tf.layers.conv2d(inputs=self.image_pl / 255, filters=16, kernel_size=[5, 5], padding='same',
+                                 activation=tf.nn.relu, name='conv1')
         # conv2 [batch, x, y, c]
-        conv2 = tf.layers.conv2d(inputs=conv1, filters=32, kernel_size=[5, 5], padding='same', activation=tf.nn.relu)
+        conv2 = tf.layers.conv2d(inputs=conv1, filters=16, kernel_size=[5, 5], padding='same', activation=tf.nn.relu,
+                                 name='conv2')
         # conv3 [batch, x, y, c]
-        conv3 = tf.layers.conv2d(inputs=conv2, filters=32, kernel_size=[3, 3], padding='same', activation=tf.nn.relu)
+        conv3 = tf.layers.conv2d(inputs=conv2, filters=16, kernel_size=[3, 3], padding='same', activation=tf.nn.relu,
+                                 name='conv3')
+        # conv4 [batch, x, y, c]
+        conv4 = tf.layers.conv2d(inputs=conv3, filters=32, kernel_size=[3, 3], padding='same', activation=tf.nn.relu,
+                                 name='conv4')
+        # conv5 [batch, x, y, c]
+        conv5 = tf.layers.conv2d(inputs=conv4, filters=32, kernel_size=[3, 3], padding='same', activation=tf.nn.relu,
+                                 name='conv5')
+        # conv6 [batch, x, y, c]
+        conv6 = tf.layers.conv2d(inputs=conv5, filters=32, kernel_size=[3, 3], padding='same', activation=tf.nn.relu,
+                                 name='conv6')
+        # conv7 [batch, x, y, c]
+        conv7 = tf.layers.conv2d(inputs=conv6, filters=32, kernel_size=[3, 3], padding='same', activation=tf.nn.relu,
+                                 name='conv7')
+        # conv8 [batch, x, y, c]
+        conv8 = tf.layers.conv2d(inputs=conv7, filters=64, kernel_size=[3, 3], padding='same', activation=tf.nn.relu,
+                                 name='conv8')
+        # conv9 [batch, x, y, c]
+        conv9 = tf.layers.conv2d(inputs=conv8, filters=64, kernel_size=[3, 3], padding='same', activation=tf.nn.relu,
+                                 name='conv9')
         # tiled [batch, timestep, c]
-        tiled = tf.tile(tf.expand_dims(conv3, axis=1), multiples=[1, self.max_timesteps, 1, 1, 1])
+        tiled = tf.tile(tf.expand_dims(conv9, axis=1), multiples=[1, self.max_timesteps, 1, 1, 1])
 
         concat = tf.concat([tiled, self.history_pl], axis=4)
 
@@ -67,11 +88,11 @@ class ExperimentModel(Model.Model):
 if __name__ == '__main__':
     image_size = 28
     prediction_size = 28
-    max_timesteps = 5
+    max_timesteps = 10
     history_length = 1
 
     global_step = tf.Variable(0, name='global_step', trainable=False)
-    train_data, valid_data = get_train_and_valid_datasets('/data/polygons_dataset',
+    train_data, valid_data = get_train_and_valid_datasets('/data/polygons_dataset_2',
                                                           max_timesteps=max_timesteps,
                                                           image_size=image_size, prediction_size=prediction_size,
                                                           history_length=history_length, is_local=True,
@@ -79,12 +100,12 @@ if __name__ == '__main__':
 
     with tf.Session() as sess:
         model_dir = '/data/{}/'.format(os.path.splitext(os.path.basename(__file__))[0])
+        if os.path.exists(model_dir):
+            shutil.rmtree(model_dir)
         model = ExperimentModel(sess, max_timesteps, image_size, prediction_size, history_length, model_dir)
         sess.run(tf.global_variables_initializer())
-        # model.maybe_restore()
 
         total_steps = 100000
-        # Wait until at least step 20000 to see decent? results
         for step_num in range(total_steps):
             batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=16)
             model.train(batch_images, batch_d, batch_h, batch_t)

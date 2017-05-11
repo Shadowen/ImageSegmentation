@@ -1,2 +1,2 @@
 # TODO
-- Prediction trajectory image summaries
+- Prediction termination (token or distance? Investigate!)

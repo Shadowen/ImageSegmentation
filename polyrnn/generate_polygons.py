@@ -61,15 +61,15 @@ if __name__ == '__main__':
     assert (abs(get_angle(np.array([0, 0]), np.array([1, 1]), np.array([2, 2])) - 180) < 0.01)
 
     # Execute
-    save_dir = '/data/polygons_dataset'
-    num_images = 10000
+    save_dir = '/data/polygons_dataset_2'
+    num_images = 100000
     if os.path.exists(save_dir):
         shutil.rmtree(save_dir)
     os.makedirs(save_dir)
     print('Generating images...')
     for i in range(num_images):
         print('\rImage {}/{}...'.format(i + 1, num_images), end='')
-        vertices, image = create_valid_polygon(image_size=28, shape_complexity=5, min_distance=10, max_distance=100,
+        vertices, image = create_valid_polygon(image_size=28, shape_complexity=10, min_distance=10, max_distance=100,
                                                min_area=10,
                                                reduction_tolerance=30)
         imsave('{}/{}.jpg'.format(save_dir, i), image)

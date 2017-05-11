@@ -143,8 +143,8 @@ class Dataset():
         histories = np.zeros([self._max_timesteps, self._prediction_size, self._prediction_size, self._history_length],
                              dtype=np.uint16)
         targets = np.zeros([self._max_timesteps, 2], dtype=np.int32)
-        for idx in range(total_num_verts):
-            histories[idx, :, :, :] = _create_history(poly_verts[:idx + 1], self._history_length, self._prediction_size)
+        for idx in range(min(total_num_verts, self._max_timesteps)):
+            histories[idx, :, :, :] = _create_history(poly_verts, idx, self._history_length, self._prediction_size)
             next_point = np.array(poly_verts[(idx + 1) % total_num_verts])
             targets[idx, :] = next_point
 
@@ -159,7 +159,7 @@ class Dataset():
         """
         batch_indices = np.random.choice(self._images.shape[0], batch_size, replace=False)
         batch_images = self._images[batch_indices]
-        batch_verts = self._vertices[batch_indices]
+        batch_verts = np.array([np.roll(p, np.random.randint(len(p)), axis=0) for p in self._vertices[batch_indices]])
         return batch_images, batch_verts
 
     def __len__(self):
@@ -171,11 +171,13 @@ class Dataset():
         return self._image_size
 
 
-def _create_history(vertices, history_length, image_size):
+def _create_history(vertices, end_idx, history_length, image_size):
+    """ Creates `history_length` frames, ending with `vertices[end_idx]` """
+    num_vertices = len(vertices)
     history_mask = np.zeros([image_size, image_size, history_length])
-    for i in range(min(len(vertices), history_length)):
-        x, y = vertices[-i - 1]
-        history_mask[y, x, -i - 1] = 1
+    for i in range(history_length):
+        x, y = vertices[(end_idx - history_length + i + 1) % num_vertices]
+        history_mask[y, x, i] = 1
     return history_mask
 
 

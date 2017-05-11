@@ -32,9 +32,12 @@ def seg_intersect(a1, a2, b1, b2):
     return does_intersect, intersection
 
 
-def iterate_in_ntuples(lst, n, offset=0):
-    """Iterates through a list in overlapping tuples of n starting from the given offset."""
-    for i in range(len(lst)):
+def iterate_in_ntuples(lst, n, offset=0, loop=True):
+    """
+    Iterates through a list in overlapping tuples of n starting from the given offset.
+    If loop=True, then the tuple (last, first) will be generated. Otherwise, it will not.
+    """
+    for i in range(len(lst) if loop else (len(lst) - n + 1)):
         yield [lst[(i + e + offset) % len(lst)] for e in range(n)]
 
 
@@ -44,6 +47,7 @@ def create_shape_mask(vertices, image_size):
     rr, cc = skimage.draw.polygon(vertices[:, 1], vertices[:, 0])
     mask[rr, cc] = 1
     return mask
+
 
 class lazyproperty(object):
     '''
