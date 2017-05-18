@@ -214,7 +214,7 @@ if __name__ == '__main__':
                                                               image_size=image_size,
                                                               prediction_size=prediction_size,
                                                               history_length=history_length, is_local=True,
-                                                              load_max_images=100000, validation_set_percentage=0.1)
+                                                              load_max_images=100000)
 
         model = ExperimentModel(sess, max_timesteps, image_size, prediction_size, history_length, model_dir)
         sess.run(tf.global_variables_initializer())
