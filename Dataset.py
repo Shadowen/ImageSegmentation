@@ -3,7 +3,7 @@ import os
 
 from scipy.misc import imread, imresize
 
-from polyrnn.util import *
+from util import *
 
 
 def get_train_and_valid_datasets(filename, max_timesteps, image_size, prediction_size, history_length, is_local=True,
@@ -57,7 +57,7 @@ def get_train_and_valid_datasets(filename, max_timesteps, image_size, prediction
         print('Loading data from numpy archives...')
         numbers = [s[:-4] for s in os.listdir('{}'.format(filename)) if s.endswith('.npy')]
         total_num_images = len(numbers) if load_max_images is None else min(len(numbers), load_max_images)
-        all_images = np.empty([total_num_images, image_size, image_size, 3], dtype=np.uint8)
+        all_images = np.empty([total_num_images, image_size, image_size, 3], dtype=np.float64)
         all_vertices = np.empty([total_num_images], dtype=np.object)
         for idx, number in enumerate(numbers):
             if idx >= total_num_images:
@@ -65,7 +65,7 @@ def get_train_and_valid_datasets(filename, max_timesteps, image_size, prediction
             print('\r{} of {} images.'.format(idx + 1, total_num_images), end='')
             # Read the file
             vertices = np.load('{}/{}.npy'.format(filename, number))
-            image = imread('{}/{}.jpg'.format(filename, number))
+            image = imread('{}/{}.jpg'.format(filename, number)) / 255
             # Convert to correct format
             if image.shape[0] != image_size:
                 image = imresize(image, [image_size, image_size])
@@ -143,7 +143,7 @@ class Dataset():
                              dtype=np.uint16)
         targets = np.zeros([self._max_timesteps, 2], dtype=np.int32)
         for idx in range(min(total_num_verts - self._history_length + 1, self._max_timesteps)):
-            histories[idx, :, :, :] = _create_history(poly_verts, idx, self._history_length, self._prediction_size)
+            histories[idx, :, :, :] = create_history(poly_verts, idx, self._history_length, self._prediction_size)
             next_point = np.array(poly_verts[(idx + 1) % total_num_verts])
             targets[idx, :] = next_point
 
@@ -168,22 +168,6 @@ class Dataset():
     @property
     def image_size(self):
         return self._image_size
-
-
-def _create_history(vertices, end_idx, history_length, image_size):
-    """ Creates `history_length` frames, ending with `vertices[end_idx]` """
-    num_vertices = len(vertices)
-    history_mask = np.zeros([image_size, image_size, history_length])
-    for i in range(history_length):
-        x, y = vertices[(end_idx - history_length + i + 1) % num_vertices]
-        history_mask[y, x, i] = 1
-    return history_mask
-
-
-def _create_point_mask(point, size):
-    mask = np.zeros([size, size])
-    mask[point[1], point[0]] = 1
-    return mask
 
 
 if __name__ == '__main__':

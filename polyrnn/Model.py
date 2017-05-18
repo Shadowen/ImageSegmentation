@@ -7,12 +7,10 @@ import matplotlib
 matplotlib.use('agg')
 import matplotlib.lines
 import matplotlib.pyplot as plt
-import numpy as np
 import tensorflow as tf
 from scipy.misc import imresize
 
-from polyrnn.util import lazyproperty, create_shape_mask, iterate_in_ntuples
-from polyrnn.Dataset import _create_history
+from util import *
 
 
 class Model():
@@ -224,7 +222,7 @@ class Model():
         zs = [np.zeros([self.prediction_size, self.prediction_size, self.history_length]) for _ in
               range(self.max_timesteps - 1)]
         histories = np.array([np.stack(
-            [_create_history(v, len(v) - 1, self.history_length, self.prediction_size)] + zs, axis=0)
+            [create_history(v, len(v) - 1, self.history_length, self.prediction_size)] + zs, axis=0)
                               for v in true_vertices])
 
         step, rnn_state = self.sess.run([self.global_step, self.rnn_zero_state], feed_dict={self.image_pl: images})

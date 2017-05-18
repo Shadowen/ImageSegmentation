@@ -3,16 +3,16 @@ import shutil
 
 import tensorflow as tf
 
+from Dataset import get_train_and_valid_datasets
+from convLSTM import ConvLSTMCell
 from polyrnn import Model
-from polyrnn.Dataset import get_train_and_valid_datasets
-from polyrnn.convLSTM import ConvLSTMCell
-from polyrnn.util import lazyproperty
+from util import lazyproperty
 
 
 class ExperimentModel(Model.Model):
     def _build_graph(self):
         # conv1 [batch, x, y, c]
-        conv1 = tf.layers.conv2d(inputs=self.image_pl / 255, filters=16, kernel_size=[5, 5], padding='same',
+        conv1 = tf.layers.conv2d(inputs=self.image_pl, filters=16, kernel_size=[5, 5], padding='same',
                                  activation=tf.nn.relu, name='conv1')
         # conv2 [batch, x, y, c]
         conv2 = tf.layers.conv2d(inputs=conv1, filters=16, kernel_size=[5, 5], padding='same', activation=tf.nn.relu,

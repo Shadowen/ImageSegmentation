@@ -5,7 +5,7 @@ import scipy.ndimage
 import scipy.spatial
 from skimage.io import imsave
 
-from polyrnn.util import *
+from util import *
 
 
 def create_valid_polygon(image_size, shape_complexity, min_area, min_distance, max_distance, reduction_tolerance):

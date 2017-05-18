@@ -2,7 +2,7 @@ from collections import defaultdict
 
 import numpy as np
 
-from polyrnn.Dataset import get_train_and_valid_datasets
+from Dataset import get_train_and_valid_datasets
 
 image_size = 28
 prediction_size = 28

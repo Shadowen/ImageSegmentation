@@ -2,8 +2,8 @@ import matplotlib.lines
 import matplotlib.pyplot as plt
 from scipy.misc import imresize
 
-from polyrnn.Dataset import get_train_and_valid_datasets, _create_point_mask
-from polyrnn.util import *
+from Dataset import get_train_and_valid_datasets
+from util import *
 
 image_size = 224
 prediction_size = 28
@@ -34,7 +34,7 @@ for i, (d, image, histories, targets, vertices) in enumerate(zip(*batch)):
     # Targets
     z = np.zeros([prediction_size, prediction_size])
     for e in range(d):
-        target_mask = _create_point_mask(targets[e], prediction_size)
+        target_mask = create_point_mask(targets[e], prediction_size)
         plt.imshow(np.stack([z, target_mask, z, target_mask], axis=2))
         plt.text(targets[e][0], targets[e][1], targets[e], color='green')
 

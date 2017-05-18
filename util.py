@@ -41,6 +41,22 @@ def iterate_in_ntuples(lst, n, offset=0, loop=True):
         yield [lst[(i + e + offset) % len(lst)] for e in range(n)]
 
 
+def create_history(vertices, end_idx, history_length, image_size):
+    """ Creates `history_length` frames, ending with `vertices[end_idx]` """
+    num_vertices = len(vertices)
+    history_mask = np.zeros([image_size, image_size, history_length])
+    for i in range(history_length):
+        x, y = vertices[(end_idx - history_length + i + 1) % num_vertices]
+        history_mask[y, x, i] = 1
+    return history_mask
+
+
+def create_point_mask(point, size):
+    mask = np.zeros([size, size])
+    mask[point[1], point[0]] = 1
+    return mask
+
+
 def create_shape_mask(vertices, image_size):
     import skimage.draw
     mask = np.zeros([image_size, image_size])

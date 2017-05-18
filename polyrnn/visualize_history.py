@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 
-from polyrnn.Dataset import get_train_and_valid_datasets, _create_point_mask
+from Dataset import get_train_and_valid_datasets
+from util import *
 
 image_size = 28
 prediction_size = 28
@@ -20,6 +21,6 @@ ax[0, 0].imshow(batch_images[0])
 for t in range(batch_h.shape[1]):
     for e in range(2):
         ax[t + 1, e].imshow(batch_h[0, t, :, :, e])
-    ax[t + 1, 2].imshow(_create_point_mask(batch_t[0, t], prediction_size))
+    ax[t + 1, 2].imshow(create_point_mask(batch_t[0, t], prediction_size))
 
 plt.show(block=True)

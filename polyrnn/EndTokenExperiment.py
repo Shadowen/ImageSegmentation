@@ -3,24 +3,23 @@ import os
 import shutil
 
 import matplotlib
-import numpy as np
 import tensorflow as tf
 
+from EndTokenDataset import get_train_and_valid_datasets
+from convLSTM import ConvLSTMCell
 from polyrnn import Model
-from polyrnn.EndTokenDataset import get_train_and_valid_datasets, _create_history
-from polyrnn.convLSTM import ConvLSTMCell
 
 matplotlib.use('agg')
 import matplotlib.lines
 import matplotlib.pyplot as plt
 from scipy.misc import imresize
-from polyrnn.util import lazyproperty, create_shape_mask, iterate_in_ntuples
+from util import *
 
 
 class ExperimentModel(Model.Model):
     def _build_graph(self):
         # conv1 [batch, x, y, c]
-        conv1 = tf.layers.conv2d(inputs=self.image_pl / 255, filters=16, kernel_size=[5, 5], padding='same',
+        conv1 = tf.layers.conv2d(inputs=self.image_pl , filters=16, kernel_size=[5, 5], padding='same',
                                  activation=tf.nn.relu, name='conv1')
         # conv2 [batch, x, y, c]
         conv2 = tf.layers.conv2d(inputs=conv1, filters=16, kernel_size=[5, 5], padding='same', activation=tf.nn.relu,
@@ -143,7 +142,7 @@ class ExperimentModel(Model.Model):
         zs = [np.zeros([self.prediction_size, self.prediction_size, self.history_length]) for _ in
               range(self.max_timesteps - 1)]
         histories = np.array([np.stack(
-            [_create_history(v, len(v) - 1, self.history_length, self.prediction_size)] + zs, axis=0)
+            [create_history(v, len(v) - 1, self.history_length, self.prediction_size)] + zs, axis=0)
                               for v in true_vertices])
 
         step, rnn_state = self.sess.run([self.global_step, self.rnn_zero_state], feed_dict={self.image_pl: images})
