@@ -42,12 +42,12 @@ def get_train_and_valid_datasets(filename, max_timesteps, image_size, prediction
                 # Store it
                 data.append((poly_verts, ground_truth))
                 images.append(image)
-            datasets.append(Dataset(np.array(data),
-                                    max_timesteps=max_timesteps,
-                                    image_size=image_size,
-                                    prediction_size=prediction_size,
-                                    images=np.array(images),
-                                    history_length=history_length))
+            datasets.append(EndTokenDataset(np.array(data),
+                                            max_timesteps=max_timesteps,
+                                            image_size=image_size,
+                                            prediction_size=prediction_size,
+                                            images=np.array(images),
+                                            history_length=history_length))
 
         print('{} polygons loaded from {}'.format((sum(map(len, datasets))), filename))
         print('{} for training. {} for validation.'.format(len(datasets[0]), len(datasets[1])))
@@ -80,19 +80,19 @@ def get_train_and_valid_datasets(filename, max_timesteps, image_size, prediction
 
         print('\n{} polygons loaded from {}'.format(len(train_images) + len(valid_images), filename))
         print('{} for training. {} for validation.'.format(len(train_images), len(valid_images)))
-        return Dataset(images=train_images,
-                       vertices=train_vertices,
-                       max_timesteps=max_timesteps,
-                       prediction_size=prediction_size,
-                       history_length=history_length), \
-               Dataset(images=valid_images,
-                       vertices=valid_vertices,
-                       max_timesteps=max_timesteps,
-                       prediction_size=prediction_size,
-                       history_length=history_length)
+        return EndTokenDataset(images=train_images,
+                               vertices=train_vertices,
+                               max_timesteps=max_timesteps,
+                               prediction_size=prediction_size,
+                               history_length=history_length), \
+               EndTokenDataset(images=valid_images,
+                               vertices=valid_vertices,
+                               max_timesteps=max_timesteps,
+                               prediction_size=prediction_size,
+                               history_length=history_length)
 
 
-class Dataset():
+class EndTokenDataset():
     def __init__(self, images, vertices, max_timesteps, prediction_size, history_length):
         self._images = images
         self._vertices = vertices
@@ -136,7 +136,8 @@ class Dataset():
         """
         total_num_verts = len(poly_verts)
 
-        start_idx = np.random.randint(total_num_verts) if start_idx is None else start_idx
+        start_idx = np.random.randint(total_num_verts) if start_idx is None else start_idx  # TODO
+
         poly_verts = np.roll(poly_verts, start_idx, axis=0)
 
         histories = np.zeros([self._max_timesteps, self._prediction_size, self._prediction_size, self._history_length],
@@ -146,6 +147,7 @@ class Dataset():
             histories[idx, :, :, :] = _create_history(poly_verts, idx, self._history_length, self._prediction_size)
             next_point = np.array(poly_verts[(idx + 1) % total_num_verts])
             targets[idx, :] = next_point
+        targets[idx, :] = np.array([self._prediction_size, 0])  # Special end token
 
         return total_num_verts - self._history_length + 1, histories, targets, poly_verts
 
@@ -187,10 +189,45 @@ def _create_point_mask(point, size):
 
 
 if __name__ == '__main__':
-    training_set, validation_set = get_train_and_valid_datasets('/home/wesley/data/polygons_dataset_2',
+    import matplotlib.pyplot as plt
+    import matplotlib.lines
+    import sys
+
+    image_size = 28
+    prediction_size = 28
+    training_set, validation_set = get_train_and_valid_datasets('/home/wesley/docker_data/polygons_dataset_3',
                                                                 max_timesteps=5,
-                                                                image_size=224,
-                                                                prediction_size=28,
+                                                                image_size=image_size,
+                                                                prediction_size=prediction_size,
                                                                 history_length=2,
-                                                                is_local=True)
-    training_set.get_batch_for_rnn(batch_size=1)
+                                                                is_local=True,
+                                                                load_max_images=100,
+                                                                validation_set_percentage=0)
+
+    batch = training_set.get_batch_for_rnn(batch_size=len(training_set))
+    for i, (d, image, histories, targets, vertices) in enumerate(zip(*batch)):
+        print('Shape {} (duration={})...'.format(i, d), end='')
+        sys.stdout.flush()
+        fig, ax = plt.subplots()
+        plt.imshow(imresize(image, prediction_size / image_size, interp='nearest'))
+        # Ground truth
+        for e, v in enumerate(vertices):
+            ax.add_artist(plt.Circle(v, 0.5, color='lightgreen'))
+            # plt.text(v[0], v[1], e, color='forestgreen')
+        for a, b in iterate_in_ntuples(vertices, n=2):
+            ax.add_line(matplotlib.lines.Line2D([a[0], b[0]], [a[1], b[1]], color='forestgreen'))
+        # Targets
+        z = np.zeros([prediction_size, prediction_size])
+        for e in range(d):
+            if targets[e][0] == prediction_size:
+                h = histories[0, :, :, 0]
+                h_coord = np.where(h)
+                plt.imshow(np.stack([z, z, h, h], axis=2))
+                plt.text(h_coord[1], h_coord[0], "END", color='blue')
+            else:
+                target_mask = _create_point_mask(targets[e], prediction_size)
+                plt.imshow(np.stack([z, z, target_mask, target_mask], axis=2))
+                plt.text(targets[e][0], targets[e][1], targets[e], color='blue')
+
+        plt.show(block=True)
+        print('Done!')

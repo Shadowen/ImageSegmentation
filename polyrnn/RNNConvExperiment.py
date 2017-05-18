@@ -71,7 +71,7 @@ if __name__ == '__main__':
     history_length = 1
 
     global_step = tf.Variable(0, name='global_step', trainable=False)
-    train_data, valid_data = get_train_and_valid_datasets('/data/polygons_dataset',
+    train_data, valid_data = get_train_and_valid_datasets('/data/polygons_dataset_3',
                                                           max_timesteps=max_timesteps,
                                                           image_size=image_size, prediction_size=prediction_size,
                                                           history_length=history_length, is_local=True,
@@ -83,7 +83,7 @@ if __name__ == '__main__':
         sess.run(tf.global_variables_initializer())
         # model.maybe_restore()
 
-        total_steps = 100000
+        total_steps = 50000
         # Wait until at least step 20000 to see decent? results
         for step_num in range(total_steps):
             batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=16)

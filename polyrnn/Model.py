@@ -97,8 +97,9 @@ class Model():
 
     @lazyproperty
     def loss(self):
-        return tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.targets_dense,
-                                                                             logits=self.prediction_logits))
+        self._loss_before_reduction = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.targets_dense,
+                                                                                     logits=self.prediction_logits)
+        return tf.reduce_mean(self._loss_before_reduction)
 
     @property
     def trainable_variables(self):
@@ -243,7 +244,8 @@ class Model():
                     prediction_duration_required[b] = 0
 
             predicted_mask = np.zeros([batch_size, self.prediction_size, self.prediction_size])
-            predicted_mask[:, out[:, 0, 1], out[:, 0, 0]] = 1
+            for b in range(batch_size):
+                predicted_mask[b, out[b, 0, 1], out[b, 0, 0]] = 1
 
             histories = np.roll(histories, axis=4, shift=1)
             histories[:, 0, :, :, -1] = predicted_mask

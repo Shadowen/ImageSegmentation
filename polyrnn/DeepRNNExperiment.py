@@ -22,7 +22,6 @@ class ExperimentModel(Model.Model):
                                  name='conv3')
         # tiled [batch, timestep, c]
         tiled = tf.tile(tf.expand_dims(conv3, axis=1), multiples=[1, self.max_timesteps, 1, 1, 1])
-
         concat = tf.concat([tiled, self.history_pl], axis=4)
 
         with tf.variable_scope('rnn'):
@@ -30,7 +29,7 @@ class ExperimentModel(Model.Model):
             rnn_input = tf.transpose(concat, (1, 0, 2, 3, 4))
 
             rnn_cell = lambda: ConvLSTMCell(shape=[28, 28], filters=16, kernel=[3, 3])
-            rnn_layers = 2
+            rnn_layers = 10
             multi_rnn_cell = tf.contrib.rnn.MultiRNNCell([rnn_cell() for _ in range(rnn_layers)])
             self._rnn_zero_state = multi_rnn_cell.zero_state(self.batch_size, dtype=tf.float32)
             self._rnn_initial_state_pl = tuple(tf.contrib.rnn.LSTMStateTuple(
@@ -71,14 +70,14 @@ if __name__ == '__main__':
     image_size = 28
     prediction_size = 28
     max_timesteps = 10
-    history_length = 1
+    history_length = 2
 
     global_step = tf.Variable(0, name='global_step', trainable=False)
     train_data, valid_data = get_train_and_valid_datasets('/data/polygons_dataset_2',
                                                           max_timesteps=max_timesteps,
                                                           image_size=image_size, prediction_size=prediction_size,
                                                           history_length=history_length, is_local=True,
-                                                          load_max_images=1)
+                                                          load_max_images=100000)
 
     with tf.Session() as sess:
         model_dir = '/data/{}/'.format(os.path.splitext(os.path.basename(__file__))[0])
@@ -89,12 +88,20 @@ if __name__ == '__main__':
         sess.run(tf.global_variables_initializer())
         # model.maybe_restore()
 
-        total_steps = 2000
+        total_steps = 100000
         for step_num in range(total_steps):
-            batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=1)
+            batch_d, batch_images, batch_h, batch_t, batch_vertices = train_data.get_batch_for_rnn(batch_size=16)
             model.train(batch_images, batch_d, batch_h, batch_t)
 
             if step_num % 100 == 0:
                 print('Step {}'.format(step_num))
-                batch_images, batch_vertices = train_data.raw_sample(batch_size=1)
+                batch_d, batch_images, batch_h, batch_t, batch_vertices = valid_data.get_batch_for_rnn(batch_size=8)
+                model.validate(batch_images, batch_d, batch_h, batch_t)
+
+            if step_num % 1000 == 0:
+                batch_images, batch_vertices = train_data.raw_sample(batch_size=8)
                 model.validate_iou(batch_images, batch_vertices, summary_prefix='train')
+
+                batch_images, batch_vertices = valid_data.raw_sample(batch_size=8)
+                model.validate_iou(batch_images, batch_vertices, summary_prefix='valid')
+                model.save()
