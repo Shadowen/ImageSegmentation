@@ -81,3 +81,11 @@ class lazyproperty(object):
         value = self.fget(obj)
         setattr(obj, self.func_name, value)
         return value
+
+
+def reset_dir(dir):
+    import os
+    import shutil
+    if os.path.exists(dir):
+        shutil.rmtree(dir)
+    os.mkdir(dir)
