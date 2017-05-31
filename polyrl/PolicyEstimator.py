@@ -1,6 +1,4 @@
-import operator
 from abc import abstractmethod
-from functools import reduce
 
 import tensorflow as tf
 
@@ -19,29 +17,30 @@ class PolicyEstimator():
 
         with tf.variable_scope('policy_estimator'):
             # Build inference graph
-            self.state_pl = tf.placeholder(shape=[None, reduce(operator.mul, state_size)], dtype=tf.float32,
-                                           name='state')
-            self._action_logits = self._build_graph()
+            self.state_pl = tf.placeholder(shape=[None] + state_size, dtype=tf.float32, name='state')
+            self.action_logits = self._build_graph(self.state_pl)
             self.softmax = tf.nn.softmax(self.action_logits)
             # Loss and training
             self.td_target_pl = tf.placeholder(shape=[None], dtype=tf.float32)
-            self.action_pl = tf.placeholder(shape=[None], dtype=tf.int32)
-            self.loss_op = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.action_pl,
+            self.action_taken_pl = tf.placeholder(shape=[None], dtype=tf.int32)
+            self.loss_op = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(labels=self.action_taken_pl,
                                                                                          logits=self.action_logits) * self.td_target_pl)
             # Ensure everything else is initialized
             for p in [self.train_op]:
                 if p is None:
                     raise NotImplementedError()
+            assert self.action_logits.get_shape().as_list() == [None] + self.action_size
             # Summaries
             self._create_summaries()
 
     @abstractmethod
-    def _build_graph(self):
-        pass
+    def _build_graph(self, state_pl):
+        """
 
-    @property
-    def action_logits(self):
-        return self._action_logits
+        :param state_pl:
+        :return: action_logits
+        """
+        pass
 
     @lazyproperty
     def train_op(self):
@@ -91,7 +90,7 @@ class PolicyEstimator():
         Only actually applies the gradient back to the estimator if apply_grads=True.
         """
         # Accumulate gradients
-        grads = self.tf_session.run(self.gradients_ops, feed_dict={self.td_target_pl: td_target, self.action_pl: action,
+        grads = self.tf_session.run(self.gradients_ops, feed_dict={self.td_target_pl: td_target, self.action_taken_pl: action,
                                                                    self.state_pl: state})
         for idx, grad in enumerate(grads):
             self.gradBuffer[idx] += grad

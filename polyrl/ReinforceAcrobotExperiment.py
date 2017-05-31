@@ -1,4 +1,6 @@
+import operator
 import os
+from functools import reduce
 
 import gym
 import tensorflow as tf
@@ -8,9 +10,9 @@ from util import *
 
 
 class ExperimentPolicyEstimator(PolicyEstimator.PolicyEstimator):
-    def _build_graph(self):
-        fc_1 = tf.layers.dense(inputs=self.state_pl, units=8, activation=tf.nn.relu)
-        return tf.layers.dense(inputs=fc_1, units=self.action_size, activation=None)
+    def _build_graph(self, state_pl):
+        fc_1 = tf.layers.dense(inputs=state_pl, units=8, activation=tf.nn.relu)
+        return tf.layers.dense(inputs=fc_1, units=reduce(operator.mul, self.action_size), activation=None)
 
     @lazyproperty
     def train_op(self):
@@ -46,7 +48,8 @@ reset_dir(logdir)
 with tf.Session() as sess:
     tf.Variable(0, name="global_step", trainable=False)
     summary_writer = tf.summary.FileWriter(logdir)
-    policy_estimator = ExperimentPolicyEstimator(state_size=env.observation_space.shape, action_size=env.action_space.n,
+    policy_estimator = ExperimentPolicyEstimator(state_size=list(env.observation_space.shape),
+                                                 action_size=[env.action_space.n],
                                                  tf_session=sess, summary_writer=summary_writer)
     summary_writer.add_graph(sess.graph)
     sess.run(tf.global_variables_initializer())

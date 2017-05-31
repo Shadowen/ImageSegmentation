@@ -53,7 +53,6 @@ class PolygonEnv():
         return intersection / union
 
 
-# A small testing interface for humans. Enter moves as tuples.
 if __name__ == '__main__':
     from Dataset import get_train_and_valid_datasets
     import matplotlib.pyplot as plt
