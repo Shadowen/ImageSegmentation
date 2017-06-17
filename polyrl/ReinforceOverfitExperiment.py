@@ -1,7 +1,14 @@
+import io
 import itertools
 import os
 
+import matplotlib
+
+matplotlib.use('agg')
+import matplotlib.lines
+import matplotlib.pyplot as plt
 import tensorflow as tf
+from scipy.misc import imresize
 
 from Dataset import get_train_and_valid_datasets
 from convLSTM import ConvLSTMCell
@@ -170,6 +177,105 @@ class ExperimentPolicyEstimator():
 
                 # self.summary_writer.add_summary(summaries, global_step)
 
+    def _create_summary_image(self, image, true_vertices, predicted_vertices, predicted_mask, iou):
+        """
+        Plots the image, true vertices, and predicted vertices in matplotlib and returns it as a tf.Summary.Image
+        Usage:
+            image_summary = tf.Summary(value=[tf.Summary.Value(
+                    tag=('image', image=Model._create_summary_image(image, true_vertices, predicted_vertices))])
+            summary_writer.add_summary(image_summary, global_step=step)
+
+        :param image: A NumPy array of shape (self.image_size, self.image_size, 3)
+        :param true_vertices: a NumPy array of shape (self.max_timesteps, 2)
+        :param predicted_vertices: a NumPy array of shape (self.max_timesteps, 2)
+        :returns: tf.Summary.Image
+        """
+        plt.ioff()
+        fig = plt.figure()
+        ax = plt.gca()
+        resized_image = imresize(image, [self.action_size, self.action_size], interp='nearest')
+        plt.imshow(resized_image)
+        for e, v in enumerate(true_vertices):
+            ax.add_artist(plt.Circle(v, radius=0.5, color='lightgreen', alpha=0.5))
+        for a, b in iterate_in_ntuples(true_vertices, n=2):
+            ax.add_line(matplotlib.lines.Line2D([a[0], b[0]], [a[1], b[1]], color='lawngreen'))
+        # History points
+        for e, v in enumerate(true_vertices[-self.history_length:]):
+            ax.add_artist(plt.Circle(v, radius=0.5, color='lightgreen', alpha=0.5))
+            plt.text(v[0], v[1] + e / 2, e - self.history_length + 1, color='lightgreen')
+        for e, v in enumerate(predicted_vertices):
+            ax.add_artist(plt.Circle(v, radius=0.5, color='salmon', alpha=0.5))
+            plt.text(v[0], v[1] + e / 2, e + 1, color='red')
+        for a, b in iterate_in_ntuples(predicted_vertices, n=2, loop=False):
+            ax.add_line(matplotlib.lines.Line2D([a[0], b[0]], [a[1], b[1]], color='tomato'))
+        if np.max(predicted_mask) > 0:
+            z = np.zeros_like(predicted_mask)
+            plt.show()
+            plt.imshow(np.stack([predicted_mask, z, z], axis=2), alpha=0.5)
+        # for e, v in enumerate(true_vertices):
+        #     plt.text(v[0] - e / 2, v[1], e, color='blue')
+        plt.text(0, 0, 'IOU={}'.format(iou), color='red')
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        plt.close(fig)
+        buf.seek(0)
+        return tf.Summary.Image(encoded_image_string=buf.getvalue())
+
+    def validate_iou(self, env, max_timesteps_per_episode=None, summary_prefix='valid', additional_feed_args={}):
+        """
+        Validates the IoU (Intersection over Union) for the given set of images and vertices.
+
+        :param images: a NumPy np.float array of shape (batch_size, self.image_size, self.image_size, 32)
+        :param true_vertices: a NumPy array of shape (batch_size, self.max_timesteps, 2)
+        :param summary_prefix: a string to prefix the generated summary names with
+        :param additional_feed_args: Dictionary of nonstandard values that should be fed during prediction (ie. dropout)
+        :return:
+        """
+        state = env.reset()
+        true_vertices = env.vertices
+        image = state[:, :, :3]
+        predicted_vertices = []
+        total_episode_reward = 0
+        rnn_state = policy_estimator.get_rnn_zero_state(batch_size=1)
+        for timestep in range(
+                max_timesteps_per_episode) if max_timesteps_per_episode is not None else itertools.count():
+            # Get an action from the policy estimator
+            histories = state[:, :, 3:]
+            action, next_rnn_state = policy_estimator.predict(image=image, history=histories, rnn_state=rnn_state)
+            # Take a step in the environment
+            next_state, reward, done = env.step(action)
+            total_episode_reward += reward
+            # Save the predicted vertex
+            predicted_vertices.append(action)
+            state = next_state
+            rnn_state = next_rnn_state
+            if done:
+                break
+
+        predicted_mask = create_shape_mask(
+            np.concatenate([true_vertices[-self.history_length:], predicted_vertices], axis=0),
+            self.action_size)
+        true_mask = create_shape_mask(true_vertices, self.action_size)
+        intersection = np.count_nonzero(np.logical_and(predicted_mask, true_mask))
+        union = np.count_nonzero(np.logical_or(predicted_mask, true_mask))
+        iou = intersection / union
+        print('Evaluated IOU={}'.format(iou))
+
+        # Summary stuff
+        image_summary = tf.Summary(
+            value=[tf.Summary.Value(
+                tag=summary_prefix + '/iou_image' if summary_prefix else 'iou_image',
+                image=self._create_summary_image(image,
+                                                 true_vertices,
+                                                 predicted_vertices,
+                                                 predicted_mask, iou))])
+        step = self.tf_session.run(self.global_step)
+        self.summary_writer.add_summary(image_summary, global_step=step)
+
+        summary = tf.Summary(value=[
+            tf.Summary.Value(tag=summary_prefix + '/iou' if summary_prefix else 'iou', simple_value=iou)])
+        self.summary_writer.add_summary(summary, global_step=step)
+
 
 def reinforce(env, sess, policy_estimator, total_episodes=None, max_timesteps_per_episode=None, summary_writer=None):
     total_reward = []
@@ -216,6 +322,10 @@ def reinforce(env, sess, policy_estimator, total_episodes=None, max_timesteps_pe
             print("\repisode={}\tglobal_step={}\tavg_reward={}".format(episode_num,
                                                                        sess.run(tf.contrib.framework.get_global_step()),
                                                                        np.mean(total_reward[-100:])))
+
+        # Validate using IoU
+        if episode_num % 100 == 0:
+            policy_estimator.validate_iou(env, max_timesteps_per_episode=max_timesteps_per_episode)
 
 
 max_timesteps = 10
