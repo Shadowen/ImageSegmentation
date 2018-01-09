@@ -259,7 +259,6 @@ class ExperimentPolicyEstimator():
         intersection = np.count_nonzero(np.logical_and(predicted_mask, true_mask))
         union = np.count_nonzero(np.logical_or(predicted_mask, true_mask))
         iou = intersection / union
-        print('Evaluated IOU={}'.format(iou))
 
         # Summary stuff
         image_summary = tf.Summary(
@@ -277,10 +276,11 @@ class ExperimentPolicyEstimator():
         self.summary_writer.add_summary(summary, global_step=step)
 
 
-def reinforce(env, sess, policy_estimator, total_episodes=None, max_timesteps_per_episode=None, summary_writer=None):
+def reinforce(train_env, valid_env, sess, policy_estimator, total_episodes=None, max_timesteps_per_episode=None,
+              summary_writer=None):
     total_reward = []
     for episode_num in range(total_episodes) if total_episodes is not None else itertools.count():
-        state = env.reset()
+        state = train_env.reset()
         image = state[:, :, :3]
         ep_history = []
         total_episode_reward = 0
@@ -291,7 +291,7 @@ def reinforce(env, sess, policy_estimator, total_episodes=None, max_timesteps_pe
             histories = state[:, :, 3:]
             action, next_rnn_state = policy_estimator.predict(image=image, history=histories, rnn_state=rnn_state)
             # Take a step in the environment
-            next_state, reward, done = env.step(action)
+            next_state, reward, done = train_env.step(action)
             total_episode_reward += reward
             # Save the transition in the replay memory
             ep_history.append([state, action, reward, next_state, done, rnn_state])
@@ -325,7 +325,10 @@ def reinforce(env, sess, policy_estimator, total_episodes=None, max_timesteps_pe
 
         # Validate using IoU
         if episode_num % 100 == 0:
-            policy_estimator.validate_iou(env, max_timesteps_per_episode=max_timesteps_per_episode)
+            policy_estimator.validate_iou(train_env, max_timesteps_per_episode=max_timesteps_per_episode,
+                                          summary_prefix='train')
+            policy_estimator.validate_iou(valid_env, max_timesteps_per_episode=max_timesteps_per_episode,
+                                          summary_prefix='valid')
 
 
 max_timesteps = 10
@@ -352,6 +355,6 @@ with tf.Session() as sess:
     summary_writer.add_graph(sess.graph)
     sess.run(tf.global_variables_initializer())
 
-    reinforce(env=training_env, sess=sess, policy_estimator=policy_estimator,
+    reinforce(train_env=training_env, valid_env=validation_env, sess=sess, policy_estimator=policy_estimator,
               total_episodes=None, max_timesteps_per_episode=max_timesteps,
               summary_writer=summary_writer)
